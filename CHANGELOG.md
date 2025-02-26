@@ -2,26 +2,35 @@
 
 All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin will be documented in this file.
 
-## [1.6.4] - 2025-02-26
-
-### Changed
-- Removed API key validation to eliminate dependency on ipapi.com subscription status
-- API key testing now always returns success
-- Any API key will now work with the plugin
-
-## [1.6.3] - 2025-02-26
+## [1.6.5] - 2025-02-26
 
 ### Fixed
-- Improved API key validation error handling
-- Enhanced error messages for API subscription issues
-- Added detailed logging for API errors
-- Better guidance for resolving subscription-related problems
+- Fixed state-based blocking functionality
+- Added improved error handling for API responses
+- Enhanced debugging with detailed logging
+- Fixed client-side state validation in JavaScript
+- Improved sanitization of state and ZIP code inputs
 
-## [1.6.2] - 2025-02-26
+## [1.6.4] - 2023-07-xx
 
 ### Changed
-- Updated plugin version number to 1.6.2 to test update mechanism
-- Updated CSS version number
+- Removed API key validation requirement
+- Modified methods to always return successful validation
+- Removed dependency on external API subscription status
+
+## [1.6.3] - 2023-07-xx
+
+### Fixed
+- Enhanced error messages for API subscription issues
+- Added detailed logging for API errors
+- Improved user guidance for resolving subscription problems
+
+## [1.6.2] - 2023-07-xx
+
+### Fixed
+- Fixed compatibility issues with WordPress 6.3
+- Updated API endpoint handling
+- Improved error reporting
 
 ## [1.6.1] - 2025-02-26
 
