@@ -1,0 +1,128 @@
+/**
+ * Formidable Forms State & ZIP Code Blocker Styles
+ */
+
+.ffb-blocked-message {
+    background-color: #f8d7da;
+    color: #721c24;
+    padding: 15px;
+    margin-bottom: 20px;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    font-size: 16px;
+    text-align: center;
+}
+
+/* Admin settings page styles */
+.ffb-settings-page .form-table th {
+    width: 250px;
+}
+
+.ffb-settings-page .form-table input[type="text"] {
+    width: 100%;
+    max-width: 400px;
+}
+
+.ffb-settings-page .description {
+    font-style: italic;
+    color: #666;
+    margin-top: 5px;
+}
+
+/* Admin IP testing section */
+.ffb-settings-page .postbox {
+    padding: 0;
+    margin-bottom: 20px;
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+}
+
+.ffb-settings-page .postbox .inside {
+    padding: 0 12px 12px;
+    margin: 6px 0 0 0;
+}
+
+.ffb-settings-page .postbox h2 {
+    padding: 8px 12px;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.4;
+    border-bottom: 1px solid #eee;
+}
+
+.ffb-settings-page .postbox p {
+    margin: 1em 0;
+}
+
+.ffb-settings-page .postbox label {
+    font-weight: bold;
+}
+
+.ffb-settings-page .postbox .description strong {
+    color: #dc3232;
+}
+
+/* Access Log Page Styles */
+.ffb-status {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-weight: bold;
+    text-transform: capitalize;
+}
+
+.ffb-status-blocked {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.ffb-status-allowed {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.ffb-status-rate_limit {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.ffb-status-admin_action {
+    background-color: #cce5ff;
+    color: #004085;
+}
+
+/* Pagination styles */
+.tablenav-pages .pagination-links {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.tablenav-pages .pagination-links .button {
+    padding: 0 10px;
+    line-height: 30px;
+    height: 30px;
+}
+
+.tablenav-pages .paging-input {
+    margin: 0 6px;
+    vertical-align: middle;
+}
+
+/* Filter styles */
+.tablenav.top {
+    margin-bottom: 15px;
+}
+
+.tablenav .alignleft.actions {
+    margin-right: 10px;
+}
+
+/* Table styles */
+.wp-list-table th {
+    font-weight: bold;
+}
+
+.wp-list-table td {
+    vertical-align: middle;
+}

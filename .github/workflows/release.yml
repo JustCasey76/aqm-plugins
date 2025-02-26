@@ -1,0 +1,76 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          # Fetch all history for proper versioning
+          fetch-depth: 0
+        
+      - name: Get plugin version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        
+      - name: Create plugin zip
+        run: |
+          # Rename directory to match WordPress plugin slug
+          mkdir -p ../build
+          PLUGIN_SLUG="aqm-formidable-spam-blocker"
+          
+          # Create zip excluding development files
+          zip -r ../build/$PLUGIN_SLUG.zip . \
+            -x "*.git*" \
+            -x ".github/*" \
+            -x "build/*" \
+            -x "create-release.ps1" \
+            -x "*.zip" \
+            -x ".gitattributes" \
+            -x "docs/dev/*" \
+            -x "tests/*" \
+            -x "node_modules/*" \
+            -x "*.log" \
+            -x "composer.json" \
+            -x "composer.lock" \
+            -x "package.json" \
+            -x "package-lock.json" \
+            -x "phpunit.xml" \
+            -x "*.md" \
+            -x "!README.md"
+          
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            AQM Form Security v${{ steps.get_version.outputs.VERSION }}
+            
+            ## How to update
+            WordPress sites with this plugin installed will receive an update notification.
+            
+            ## Manual installation
+            Download the zip file and upload it to your WordPress site.
+          draft: false
+          prerelease: false
+          
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ../build/aqm-formidable-spam-blocker.zip
+          asset_name: aqm-formidable-spam-blocker.zip
+          asset_content_type: application/zip
