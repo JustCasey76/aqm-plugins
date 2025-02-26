@@ -8,11 +8,18 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Enhanced API key validation with subscription plan detection
 - Added detailed error messages for API subscription issues
 - Improved security with nonce verification for API testing
+- Added "Check for Updates" option on the plugins page
+- Improved API key testing UI with real-time feedback
 
 ### Changed
 - Updated plugin version number to 1.6.1
 - Refactored API key testing functionality
 - Improved error handling for API connection issues
+
+### Security
+- Fixed nonce verification in AJAX handlers
+- Improved input sanitization
+- Added proper capability checks for admin actions
 
 ## [1.6.0] - 2025-02-15
 
