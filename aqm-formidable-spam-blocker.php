@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AQM Form Security
  * Description: Blocks form submissions from non-approved states and ZIP codes using Formidable Forms. Only allows US-based IPs from approved states and applies to all Formidable Forms.
- * Version: 1.6.1
+ * $11.6.1
  * Author: AQ Marketing
  * Plugin URI: https://github.com/JustCasey76/aqm-plugins
  * GitHub Plugin URI: https://github.com/JustCasey76/aqm-plugins
