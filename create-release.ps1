@@ -60,7 +60,7 @@ git add $pluginFile
 if ([string]::IsNullOrEmpty($message)) {
     $commitMessage = "Bump version to $phpVersion"
 } else {
-    $commitMessage = "Bump version to $phpVersion: $message"
+    $commitMessage = "Bump version to $phpVersion - $message"
 }
 
 git commit -m $commitMessage

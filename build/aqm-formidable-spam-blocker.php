@@ -5,7 +5,7 @@
  * Version: 1.6.1
  * Author: AQ Marketing
  * Plugin URI: https://github.com/JustCasey76/aqm-plugins
- * GitHub Plugin URI: https://github.com/JustCasey76/aqm-plugins
+ * GitHub Plugin URI: https://github.com/JustCasey76/aqm-plugins/tree/master
  */
 
 if (!defined('ABSPATH')) {
