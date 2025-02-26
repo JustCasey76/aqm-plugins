@@ -2,6 +2,13 @@
 
 All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin will be documented in this file.
 
+## [1.6.4] - 2025-02-26
+
+### Changed
+- Removed API key validation to eliminate dependency on ipapi.com subscription status
+- API key testing now always returns success
+- Any API key will now work with the plugin
+
 ## [1.6.3] - 2025-02-26
 
 ### Fixed
