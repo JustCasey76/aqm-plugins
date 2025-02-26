@@ -35,9 +35,75 @@ class AQM_Plugin_Updater {
         add_filter('plugins_api', array($this, 'plugin_popup'), 10, 3);
         add_filter('upgrader_post_install', array($this, 'after_install'), 10, 3);
         
+        // Add row action to check for updates
+        add_filter('plugin_action_links_' . plugin_basename($plugin_file), array($this, 'add_check_update_link'));
+        
+        // Handle manual update check
+        add_action('admin_init', array($this, 'handle_manual_update_check'));
+        
         // Get plugin data
         $this->plugin_data = get_plugin_data($plugin_file);
         $this->slug = plugin_basename($plugin_file);
+    }
+
+    /**
+     * Add "Check for Updates" link to plugin actions
+     *
+     * @param array $links Existing plugin action links
+     * @return array Modified plugin action links
+     */
+    public function add_check_update_link($links) {
+        $check_update_url = wp_nonce_url(
+            add_query_arg(
+                array(
+                    'aqm_check_update' => 'true',
+                    'plugin' => plugin_basename($this->plugin_file)
+                ),
+                admin_url('plugins.php')
+            ),
+            'aqm_check_update_nonce'
+        );
+        
+        $links[] = '<a href="' . esc_url($check_update_url) . '">' . __('Check for Updates', 'aqm-formidable-spam-blocker') . '</a>';
+        
+        return $links;
+    }
+
+    /**
+     * Handle manual update check
+     */
+    public function handle_manual_update_check() {
+        if (isset($_GET['aqm_check_update']) && $_GET['aqm_check_update'] === 'true' && 
+            isset($_GET['plugin']) && $_GET['plugin'] === plugin_basename($this->plugin_file)) {
+            
+            // Verify nonce
+            if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'aqm_check_update_nonce')) {
+                wp_die(__('Security check failed', 'aqm-formidable-spam-blocker'));
+            }
+            
+            // Clear the plugin update cache
+            delete_site_transient('update_plugins');
+            
+            // Redirect back to the plugins page
+            wp_redirect(admin_url('plugins.php?aqm_update_checked=true'));
+            exit;
+        }
+        
+        // Show admin notice after checking for updates
+        if (isset($_GET['aqm_update_checked']) && $_GET['aqm_update_checked'] === 'true') {
+            add_action('admin_notices', array($this, 'update_check_notice'));
+        }
+    }
+
+    /**
+     * Display admin notice after checking for updates
+     */
+    public function update_check_notice() {
+        ?>
+        <div class="notice notice-success is-dismissible">
+            <p><?php _e('AQM Form Security plugin has checked for updates.', 'aqm-formidable-spam-blocker'); ?></p>
+        </div>
+        <?php
     }
 
     /**

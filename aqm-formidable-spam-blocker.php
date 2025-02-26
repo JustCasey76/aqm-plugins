@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AQM Form Security
  * Description: Blocks form submissions from non-approved states and ZIP codes using Formidable Forms. Only allows US-based IPs from approved states and applies to all Formidable Forms.
- * Version: 1.6.0
+ * Version: 1.6.1
  * Author: AQ Marketing
  * Plugin URI: https://github.com/JustCasey76/aqm-plugins
  * GitHub Plugin URI: https://github.com/JustCasey76/aqm-plugins
@@ -82,7 +82,7 @@ class FormidableFormsBlocker {
 
     public function enqueue_scripts() {
         wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], null, true);
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.0');
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.1');
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
             'api_url' => 'https://api.ipapi.com/api/check?access_key=' . $this->api_key,
             'approved_states' => $this->approved_states
@@ -441,7 +441,11 @@ class FormidableFormsBlocker {
      */
     public function ajax_test_api_key() {
         // Verify nonce and permissions
-        check_admin_referer('ffb_test_api_key', 'nonce');
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'ffb_test_api_key')) {
+            wp_send_json_error(['error' => 'Security check failed']);
+            return;
+        }
+        
         if (!current_user_can('manage_options')) {
             wp_send_json_error(['error' => 'Permission denied']);
             return;
@@ -648,8 +652,19 @@ class FormidableFormsBlocker {
                                         $(this).text('Show');
                                     }
                                 });
+                                
                                 $('#test_api_key').click(function() {
                                     var apiKey = $('#ffb_api_key').val();
+                                    var resultContainer = $('.api-key-container').siblings('.description').last();
+                                    
+                                    // Show loading indicator
+                                    if (resultContainer.hasClass('error') || resultContainer.hasClass('success')) {
+                                        resultContainer.removeClass('error success').text('Testing API key...');
+                                    } else {
+                                        $('<p class="description">Testing API key...</p>').insertAfter($('.api-key-container').siblings('.description').last());
+                                        resultContainer = $('.api-key-container').siblings('.description').last();
+                                    }
+                                    
                                     $.ajax({
                                         type: 'POST',
                                         url: '<?php echo admin_url('admin-ajax.php'); ?>',
@@ -660,10 +675,16 @@ class FormidableFormsBlocker {
                                         },
                                         success: function(response) {
                                             if (response.success) {
-                                                alert('API key is valid!');
+                                                resultContainer.removeClass('error').addClass('success')
+                                                    .html('API key is valid! <strong>Plan: ' + response.data.plan + '</strong><br>' + response.data.message);
                                             } else {
-                                                alert('API key is invalid: ' + response.error);
+                                                resultContainer.removeClass('success').addClass('error')
+                                                    .text('API key error: ' + (response.data && response.data.error ? response.data.error : 'Unknown error'));
                                             }
+                                        },
+                                        error: function(xhr, status, error) {
+                                            resultContainer.removeClass('success').addClass('error')
+                                                .text('Error testing API key: ' + error);
                                         }
                                     });
                                 });
