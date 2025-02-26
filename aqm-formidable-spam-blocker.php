@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AQM Form Security
  * Description: Blocks form submissions from non-approved states and ZIP codes using Formidable Forms. Only allows US-based IPs from approved states and applies to all Formidable Forms.
- * Version: 1.6.2
+ * Version: 1.6.3
  * Author: AQ Marketing
  * Plugin URI: https://github.com/JustCasey76/aqm-plugins
  * GitHub Plugin URI: https://github.com/JustCasey76/aqm-plugins/tree/master
@@ -82,7 +82,7 @@ class FormidableFormsBlocker {
 
     public function enqueue_scripts() {
         wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], null, true);
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.2');
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.3');
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
             'api_url' => 'https://api.ipapi.com/api/check?access_key=' . $this->api_key,
             'approved_states' => $this->approved_states
@@ -336,13 +336,40 @@ class FormidableFormsBlocker {
         // Check if API returned an error
         if (isset($data['success']) && $data['success'] === false) {
             $error_message = isset($data['error']['info']) ? $data['error']['info'] : 'Unknown API error';
+            $error_code = isset($data['error']['code']) ? $data['error']['code'] : 0;
             
-            // Add more specific guidance for subscription errors
-            if (strpos($error_message, 'Subscription') !== false) {
-                $error_message .= '. Please verify your ipapi.com account is active and your subscription plan has not expired.';
+            // Handle specific error codes with more helpful messages
+            switch ($error_code) {
+                case 101:
+                    $error_message = 'Invalid API key. Please check that you entered it correctly.';
+                    break;
+                case 102:
+                    $error_message = 'User account is inactive. Please log in to your ipapi.com account to reactivate it.';
+                    break;
+                case 104:
+                    $error_message = 'Monthly usage limit reached. Please upgrade your plan at ipapi.com.';
+                    break;
+                case 105:
+                    $error_message = 'Function access restricted. This feature is not available on your current plan. Please upgrade to a higher plan.';
+                    break;
+                default:
+                    // Add more specific guidance for subscription errors
+                    if (strpos($error_message, 'Subscription') !== false) {
+                        $error_message = 'API key error: ' . $error_message . ' Please log in to your ipapi.com account to check your subscription status. You may need to renew or upgrade your plan.';
+                    } else {
+                        $error_message = 'API error: ' . $error_message;
+                    }
             }
             
-            set_transient('ffb_api_key_error', 'API error: ' . $error_message, 60);
+            set_transient('ffb_api_key_error', $error_message, 60);
+            
+            // Log the full error response for debugging
+            error_log('IPAPI Validation Error: ' . print_r([
+                'code' => $error_code,
+                'message' => $error_message,
+                'data' => $data
+            ], true));
+            
             return get_option('ffb_api_key'); // Return existing key
         }
         
@@ -395,25 +422,32 @@ class FormidableFormsBlocker {
             // Handle specific error codes
             switch ($error_code) {
                 case 101:
-                    $result['message'] = 'Invalid API key';
+                    $result['message'] = 'Invalid API key. Please check that you entered it correctly.';
                     break;
                 case 102:
-                    $result['message'] = 'User account is inactive';
+                    $result['message'] = 'User account is inactive. Please log in to your ipapi.com account to reactivate it.';
                     break;
                 case 104:
-                    $result['message'] = 'Monthly usage limit reached';
+                    $result['message'] = 'Monthly usage limit reached. Please upgrade your plan at ipapi.com.';
                     break;
                 case 105:
-                    $result['message'] = 'Function access restricted (feature not available on current plan)';
+                    $result['message'] = 'Function access restricted. This feature is not available on your current plan. Please upgrade to a higher plan.';
                     break;
                 default:
                     // Add more specific guidance for subscription errors
                     if (strpos($error_message, 'Subscription') !== false) {
-                        $result['message'] = $error_message . '. Please verify your ipapi.com account is active and your subscription plan has not expired.';
+                        $result['message'] = 'API key error: ' . $error_message . ' Please log in to your ipapi.com account to check your subscription status. You may need to renew or upgrade your plan.';
                     } else {
                         $result['message'] = 'API error: ' . $error_message;
                     }
             }
+            
+            // Log the full error response for debugging
+            error_log('IPAPI Error: ' . print_r([
+                'code' => $error_code,
+                'message' => $error_message,
+                'data' => $data
+            ], true));
             
             return $result;
         }

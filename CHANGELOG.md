@@ -2,6 +2,14 @@
 
 All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin will be documented in this file.
 
+## [1.6.3] - 2025-02-26
+
+### Fixed
+- Improved API key validation error handling
+- Enhanced error messages for API subscription issues
+- Added detailed logging for API errors
+- Better guidance for resolving subscription-related problems
+
 ## [1.6.2] - 2025-02-26
 
 ### Changed
