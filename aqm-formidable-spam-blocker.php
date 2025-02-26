@@ -354,6 +354,114 @@ class FormidableFormsBlocker {
         return $key;
     }
 
+    /**
+     * Check API key subscription status
+     * 
+     * @param string $api_key The API key to check
+     * @return array Status information with 'valid', 'plan', and 'message' keys
+     */
+    public function check_api_subscription($api_key) {
+        // Default response
+        $result = [
+            'valid' => false,
+            'plan' => 'unknown',
+            'message' => 'API key not validated'
+        ];
+        
+        // If key is empty, return default response
+        if (empty($api_key)) {
+            $result['message'] = 'API key is empty';
+            return $result;
+        }
+        
+        // Make a test request to the API
+        $test_ip = '8.8.8.8'; // Google's DNS IP for testing
+        $response = wp_remote_get("https://api.ipapi.com/{$test_ip}?access_key={$api_key}");
+        
+        // Check if request was successful
+        if (is_wp_error($response)) {
+            $result['message'] = 'API connection error: ' . $response->get_error_message();
+            return $result;
+        }
+        
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+        
+        // Check if API returned an error
+        if (isset($data['success']) && $data['success'] === false) {
+            $error_message = isset($data['error']['info']) ? $data['error']['info'] : 'Unknown API error';
+            $error_code = isset($data['error']['code']) ? $data['error']['code'] : 0;
+            
+            // Handle specific error codes
+            switch ($error_code) {
+                case 101:
+                    $result['message'] = 'Invalid API key';
+                    break;
+                case 102:
+                    $result['message'] = 'User account is inactive';
+                    break;
+                case 104:
+                    $result['message'] = 'Monthly usage limit reached';
+                    break;
+                case 105:
+                    $result['message'] = 'Function access restricted (feature not available on current plan)';
+                    break;
+                default:
+                    // Add more specific guidance for subscription errors
+                    if (strpos($error_message, 'Subscription') !== false) {
+                        $result['message'] = $error_message . '. Please verify your ipapi.com account is active and your subscription plan has not expired.';
+                    } else {
+                        $result['message'] = 'API error: ' . $error_message;
+                    }
+            }
+            
+            return $result;
+        }
+        
+        // Key is valid, determine plan based on available data
+        $result['valid'] = true;
+        
+        // Check for security module (only available on Business Pro plan and higher)
+        if (isset($data['security'])) {
+            $result['plan'] = 'business_pro_or_higher';
+        } 
+        // Check for hostname (available on all paid plans)
+        else if (isset($data['hostname']) && $data['hostname'] !== $test_ip) {
+            $result['plan'] = 'paid';
+        } else {
+            $result['plan'] = 'free';
+        }
+        
+        $result['message'] = 'API key is valid (' . ucfirst(str_replace('_', ' ', $result['plan'])) . ' plan)';
+        return $result;
+    }
+
+    /**
+     * AJAX handler for testing API key and subscription status
+     */
+    public function ajax_test_api_key() {
+        // Verify nonce and permissions
+        check_admin_referer('ffb_test_api_key', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['error' => 'Permission denied']);
+            return;
+        }
+        
+        $api_key = isset($_POST['api_key']) ? sanitize_text_field($_POST['api_key']) : '';
+        
+        // Check subscription status
+        $status = $this->check_api_subscription($api_key);
+        
+        if ($status['valid']) {
+            wp_send_json_success([
+                'message' => $status['message'],
+                'plan' => $status['plan']
+            ]);
+        } else {
+            wp_send_json_error(['error' => $status['message']]);
+        }
+    }
+
     public function settings_page() {
         // Handle the case where approved_zip_codes is stored in the object but not in options
         $zip_codes = get_option('ffb_approved_zip_codes', $this->approved_zip_codes);
@@ -547,7 +655,8 @@ class FormidableFormsBlocker {
                                         url: '<?php echo admin_url('admin-ajax.php'); ?>',
                                         data: {
                                             action: 'ffb_test_api_key',
-                                            api_key: apiKey
+                                            api_key: apiKey,
+                                            nonce: '<?php echo wp_create_nonce('ffb_test_api_key'); ?>'
                                         },
                                         success: function(response) {
                                             if (response.success) {
@@ -719,36 +828,6 @@ class FormidableFormsBlocker {
             <?php endif; ?>
         </div>
         <?php
-    }
-
-    public function ajax_test_api_key() {
-        $api_key = $_POST['api_key'];
-        
-        // Make a test request to the API
-        $test_ip = '8.8.8.8'; // Google's DNS IP for testing
-        $response = wp_remote_get("https://api.ipapi.com/{$test_ip}?access_key={$api_key}");
-        
-        // Check if request was successful
-        if (is_wp_error($response)) {
-            wp_send_json_error(['error' => 'API connection error: ' . $response->get_error_message()]);
-        }
-        
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
-        
-        // Check if API returned an error
-        if (isset($data['success']) && $data['success'] === false) {
-            $error_message = isset($data['error']['info']) ? $data['error']['info'] : 'Unknown API error';
-            
-            // Add more specific guidance for subscription errors
-            if (strpos($error_message, 'Subscription') !== false) {
-                $error_message .= '. Please verify your ipapi.com account is active and your subscription plan has not expired.';
-            }
-            
-            wp_send_json_error(['error' => 'API error: ' . $error_message]);
-        }
-        
-        wp_send_json_success(['message' => 'API key is valid!']);
     }
 
 }
