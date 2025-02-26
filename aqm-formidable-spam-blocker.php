@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AQM Form Security
  * Description: Blocks form submissions from non-approved states and ZIP codes using Formidable Forms. Only allows US-based IPs from approved states and applies to all Formidable Forms.
- * Version: 1.6.1
+ * Version: 1.6.2
  * Author: AQ Marketing
  * Plugin URI: https://github.com/JustCasey76/aqm-plugins
  * GitHub Plugin URI: https://github.com/JustCasey76/aqm-plugins/tree/master
@@ -82,7 +82,7 @@ class FormidableFormsBlocker {
 
     public function enqueue_scripts() {
         wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], null, true);
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.1');
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.2');
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
             'api_url' => 'https://api.ipapi.com/api/check?access_key=' . $this->api_key,
             'approved_states' => $this->approved_states

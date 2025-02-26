@@ -2,6 +2,12 @@
 
 All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin will be documented in this file.
 
+## [1.6.2] - 2025-02-26
+
+### Changed
+- Updated plugin version number to 1.6.2 to test update mechanism
+- Updated CSS version number
+
 ## [1.6.1] - 2025-02-26
 
 ### Added
