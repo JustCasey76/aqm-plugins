@@ -240,7 +240,7 @@ class FormidableFormsBlocker {
         $country = isset($geo_data['country_name']) ? $geo_data['country_name'] : '';
         $region = isset($geo_data['region']) ? $geo_data['region'] : '';
         $region_code = isset($geo_data['region_code']) ? $geo_data['region_code'] : '';
-        $zip = isset($geo_data['postal']) ? $geo_data['postal'] : '';
+        $zip = isset($geo_data['zip']) ? $geo_data['zip'] : '';
         
         $wpdb->insert($table_name, [
             'time' => current_time('mysql'),
@@ -299,8 +299,8 @@ class FormidableFormsBlocker {
         }
         
         // Check ZIP code if we have approved ZIP codes configured
-        if (!empty($this->approved_zip_codes) && $geo_data && isset($geo_data['postal'])) {
-            $postal_code = preg_replace('/[^0-9]/', '', $geo_data['postal']);
+        if (!empty($this->approved_zip_codes) && $geo_data && isset($geo_data['zip'])) {
+            $postal_code = preg_replace('/[^0-9]/', '', $geo_data['zip']);
             
             // Get just the first 5 digits for US ZIP codes
             if (strlen($postal_code) > 5) {
@@ -622,11 +622,32 @@ class FormidableFormsBlocker {
             error_log('IPAPI Region Code: ' . $geo_data['region_code']);
         }
         
+        if (isset($geo_data['region_name'])) {
+            error_log('IPAPI Region Name: ' . $geo_data['region_name']);
+        }
+        
         if (isset($geo_data['region'])) {
             error_log('IPAPI Region: ' . $geo_data['region']);
         }
         
-        return $geo_data;
+        // Check for ZIP/postal code
+        if (isset($geo_data['zip'])) {
+            error_log('IPAPI ZIP Code: ' . $geo_data['zip']);
+        }
+        
+        if (isset($geo_data['postal'])) {
+            error_log('IPAPI Postal Code: ' . $geo_data['postal']);
+        }
+        
+        // Create a standardized response for display
+        $standardized_data = [
+            'country' => isset($geo_data['country_name']) ? $geo_data['country_name'] . ' (' . $geo_data['country_code'] . ')' : 'Not available (N/A)',
+            'region' => isset($geo_data['region_name']) ? $geo_data['region_name'] : (isset($geo_data['region']) ? $geo_data['region'] : 'Not available'),
+            'region_code' => isset($geo_data['region_code']) ? $geo_data['region_code'] : 'Not available',
+            'zip' => isset($geo_data['zip']) ? $geo_data['zip'] : (isset($geo_data['postal']) ? $geo_data['postal'] : 'Not available')
+        ];
+        
+        return $standardized_data;
     }
 
     public function settings_page() {
@@ -723,10 +744,10 @@ class FormidableFormsBlocker {
                             echo '<div class="notice notice-info"><p>API test completed. Check your server error log for detailed information.</p>';
                             echo '<p>Your location according to the API:</p>';
                             echo '<ul>';
-                            echo '<li><strong>Country:</strong> ' . (isset($api_response['country_name']) ? esc_html($api_response['country_name']) : 'Not available') . ' (' . (isset($api_response['country_code']) ? esc_html($api_response['country_code']) : 'N/A') . ')</li>';
+                            echo '<li><strong>Country:</strong> ' . (isset($api_response['country']) ? esc_html($api_response['country']) : 'Not available') . '</li>';
                             echo '<li><strong>Region:</strong> ' . (isset($api_response['region']) ? esc_html($api_response['region']) : 'Not available') . '</li>';
                             echo '<li><strong>Region Code:</strong> ' . (isset($api_response['region_code']) ? esc_html($api_response['region_code']) : 'Not available') . '</li>';
-                            echo '<li><strong>ZIP/Postal Code:</strong> ' . (isset($api_response['postal']) ? esc_html($api_response['postal']) : 'Not available') . '</li>';
+                            echo '<li><strong>ZIP/Postal Code:</strong> ' . (isset($api_response['zip']) ? esc_html($api_response['zip']) : 'Not available') . '</li>';
                             echo '</ul>';
                             echo '</div>';
                         } else {
@@ -965,7 +986,7 @@ class FormidableFormsBlocker {
                                                 html += '<tr><td><strong>Country:</strong></td><td>' + (data.data.country_name || 'N/A') + ' (' + (data.data.country_code || 'N/A') + ')</td></tr>';
                                                 html += '<tr><td><strong>Region:</strong></td><td>' + (data.data.region || 'N/A') + '</td></tr>';
                                                 html += '<tr><td><strong>City:</strong></td><td>' + (data.data.city || 'N/A') + '</td></tr>';
-                                                html += '<tr><td><strong>ZIP:</strong></td><td>' + (data.data.postal || 'N/A') + '</td></tr>';
+                                                html += '<tr><td><strong>ZIP:</strong></td><td>' + (data.data.zip || 'N/A') + '</td></tr>';
                                                 html += '<tr><td><strong>Latitude:</strong></td><td>' + (data.data.latitude || 'N/A') + '</td></tr>';
                                                 html += '<tr><td><strong>Longitude:</strong></td><td>' + (data.data.longitude || 'N/A') + '</td></tr>';
                                                 html += '</table>';
@@ -1209,9 +1230,9 @@ class FormidableFormsBlocker {
      * 
      * @return array|false Geolocation data or false on failure
      */
-    public function get_geo_data() {
+    public function get_geo_data($ip = null) {
         // Check if we have cached data
-        $user_ip = $_SERVER['REMOTE_ADDR'];
+        $user_ip = $ip ?? $_SERVER['REMOTE_ADDR'];
         $cache_key = 'ffb_geo_' . md5($user_ip);
         $cached_data = get_transient($cache_key);
         
@@ -1249,7 +1270,10 @@ class FormidableFormsBlocker {
             return false;
         }
         
-        // Check for API error messages
+        // Log the complete response for debugging
+        error_log('FFB: Complete API response - ' . print_r($geo_data, true));
+        
+        // Check for API error messages (success field may not be present in valid responses)
         if (isset($geo_data['success']) && $geo_data['success'] === false) {
             $error_info = isset($geo_data['error']['info']) ? $geo_data['error']['info'] : 'Unknown API error';
             $error_code = isset($geo_data['error']['code']) ? $geo_data['error']['code'] : 'Unknown';
@@ -1279,10 +1303,24 @@ class FormidableFormsBlocker {
             return false;
         }
         
-        // Cache the data for 1 hour
-        set_transient($cache_key, $geo_data, 3600);
+        // Standardize the response format for our plugin
+        $standardized_data = [
+            'ip' => $geo_data['ip'] ?? $user_ip,
+            'country_code' => $geo_data['country_code'] ?? '',
+            'country_name' => $geo_data['country_name'] ?? '',
+            'region' => $geo_data['region_name'] ?? ($geo_data['region_code'] ?? ''),
+            'region_code' => $geo_data['region_code'] ?? '',
+            'region_name' => $geo_data['region_name'] ?? '',
+            'city' => $geo_data['city'] ?? '',
+            'zip' => $geo_data['zip'] ?? '',
+            'latitude' => $geo_data['latitude'] ?? 0,
+            'longitude' => $geo_data['longitude'] ?? 0
+        ];
         
-        return $geo_data;
+        // Cache the standardized data for 1 hour
+        set_transient($cache_key, $standardized_data, 3600);
+        
+        return $standardized_data;
     }
 
     /**
