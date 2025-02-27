@@ -3,7 +3,7 @@
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
  * Description: Block form submissions based on IP, state, or ZIP code.
- * Version: 1.6.5
+ * Version: 1.6.8
  * Author: AQ Marketing
  * Author URI: https://aqmarketing.com
  */
@@ -78,14 +78,20 @@ class FormidableFormsBlocker {
         
         // Add AJAX handler for API key testing
         add_action('wp_ajax_ffb_test_api_key', [$this, 'ajax_test_api_key']);
+        
+        // Add AJAX handlers for IP management
+        add_action('wp_ajax_ffb_search_ip', [$this, 'ajax_search_ip']);
+        add_action('wp_ajax_ffb_delete_ip', [$this, 'ajax_delete_ip']);
+        add_action('wp_ajax_ffb_clear_cache', [$this, 'ajax_clear_cache']);
     }
 
     public function enqueue_scripts() {
-        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.6.5', true);
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.5');
+        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.6.8', true);
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.8');
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
             'api_url' => 'https://api.ipapi.com/check?access_key=' . $this->api_key . '&ip=',
             'approved_states' => $this->approved_states,
+            'approved_zip_codes' => $this->approved_zip_codes,
             'block_non_us' => get_option('ffb_block_non_us', '1') === '1'
         ]);
     }
@@ -115,28 +121,13 @@ class FormidableFormsBlocker {
         }
         
         // Get geo data from IP
-        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$this->api_key}&ip={$user_ip}");
+        $geo_data = $this->get_geo_data($user_ip);
         
         // Check for API errors
-        if (is_wp_error($geo_data)) {
-            error_log('IPAPI Error: ' . $geo_data->get_error_message());
+        if (!$geo_data) {
+            error_log('IPAPI Error: Unable to retrieve geo data');
             // Allow submission if we can't get geo data
-            $this->log_access_attempt($user_ip, 'allowed', 'API error: ' . $geo_data->get_error_message(), $form_id);
-            return $errors;
-        }
-        
-        $body = wp_remote_retrieve_body($geo_data);
-        $geo_data = json_decode($body, true);
-        
-        // Log the geo data for debugging
-        error_log('IPAPI Response for IP ' . $user_ip . ': ' . print_r($geo_data, true));
-        
-        // Check if API returned an error
-        if (isset($geo_data['success']) && $geo_data['success'] === false) {
-            $error_message = isset($geo_data['error']['info']) ? $geo_data['error']['info'] : 'Unknown API error';
-            error_log('IPAPI Error: ' . $error_message);
-            // Allow submission if we can't get geo data
-            $this->log_access_attempt($user_ip, 'allowed', 'API error: ' . $error_message, $form_id);
+            $this->log_access_attempt($user_ip, 'allowed', 'API error: Unable to retrieve geo data', $form_id);
             return $errors;
         }
         
@@ -154,8 +145,8 @@ class FormidableFormsBlocker {
             // Make sure approved_states is an array of trimmed values
             $approved_states = array_map('trim', $this->approved_states);
             
-            if ($geo_data && isset($geo_data['region'])) {
-                $region_code = trim($geo_data['region']);
+            if ($geo_data && (isset($geo_data['region']) || isset($geo_data['region_code']))) {
+                $region_code = trim($geo_data['region'] ?? $geo_data['region_code']);
                 
                 // Debug log
                 error_log('Checking state: ' . $region_code . ' against approved states: ' . implode(',', $approved_states));
@@ -243,12 +234,11 @@ class FormidableFormsBlocker {
         $table_name = $wpdb->prefix . 'ffb_access_log';
         
         // Get geo data for the IP
-        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$this->api_key}&ip={$ip}");
-        $geo_data = json_decode(wp_remote_retrieve_body($geo_data), true);
+        $geo_data = $this->get_geo_data($ip);
         
         $country = isset($geo_data['country_name']) ? $geo_data['country_name'] : '';
         $region = isset($geo_data['region']) ? $geo_data['region'] : '';
-        $region_code = isset($geo_data['region']) ? $geo_data['region'] : '';
+        $region_code = isset($geo_data['region_code']) ? $geo_data['region_code'] : '';
         $zip = isset($geo_data['postal']) ? $geo_data['postal'] : '';
         
         $wpdb->insert($table_name, [
@@ -278,8 +268,12 @@ class FormidableFormsBlocker {
             return $content;
         }
         
-        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$this->api_key}&ip={$user_ip}");
-        $geo_data = json_decode(wp_remote_retrieve_body($geo_data), true);
+        $geo_data = $this->get_geo_data($user_ip);
+        
+        // DEBUG: Log geo data for troubleshooting
+        error_log('FFB Debug - IP: ' . $user_ip);
+        error_log('FFB Debug - Geo Data: ' . print_r($geo_data, true));
+        error_log('FFB Debug - Approved States: ' . print_r($this->approved_states, true));
         
         // Check if we should block non-US IPs
         if (get_option('ffb_block_non_us', '1') === '1') {
@@ -291,10 +285,36 @@ class FormidableFormsBlocker {
         }
         
         // Only check state if we have approved states configured
-        if (!empty($this->approved_states) && $geo_data && isset($geo_data['region']) && !in_array($geo_data['region'], $this->approved_states)) {
-            // Replace any Formidable Forms with a message
-            $content = preg_replace('/\[formidable.*?\]/', '<p class="ffb-blocked-message">Forms are not available in your state.</p>', $content);
-            return $content;
+        if (!empty($this->approved_states) && $geo_data && (isset($geo_data['region']) || isset($geo_data['region_code']))) {
+            // DEBUG: Log state comparison
+            error_log('FFB Debug - User Region: ' . ($geo_data['region'] ?? $geo_data['region_code']));
+            error_log('FFB Debug - Region in approved states: ' . (in_array($geo_data['region'] ?? $geo_data['region_code'], $this->approved_states) ? 'YES' : 'NO'));
+            
+            if (!in_array($geo_data['region'] ?? $geo_data['region_code'], $this->approved_states)) {
+                // Replace any Formidable Forms with a message
+                $content = preg_replace('/\[formidable.*?\]/', '<p class="ffb-blocked-message">Forms are not available in your state.</p>', $content);
+                return $content;
+            }
+        }
+        
+        // Check ZIP code if we have approved ZIP codes configured
+        if (!empty($this->approved_zip_codes) && $geo_data && isset($geo_data['postal'])) {
+            $postal_code = preg_replace('/[^0-9]/', '', $geo_data['postal']);
+            
+            // Get just the first 5 digits for US ZIP codes
+            if (strlen($postal_code) > 5) {
+                $postal_code = substr($postal_code, 0, 5);
+            }
+            
+            // DEBUG: Log ZIP code comparison
+            error_log('FFB Debug - User Postal Code: ' . $postal_code);
+            error_log('FFB Debug - Postal in approved codes: ' . (in_array($postal_code, $this->approved_zip_codes) ? 'YES' : 'NO'));
+            
+            if (!in_array($postal_code, $this->approved_zip_codes)) {
+                // Replace any Formidable Forms with a message
+                $content = preg_replace('/\[formidable.*?\]/', '<p class="ffb-blocked-message">Forms are not available in your ZIP code.</p>', $content);
+                return $content;
+            }
         }
 
         return $content;
@@ -414,6 +434,130 @@ class FormidableFormsBlocker {
         ]);
     }
 
+    /**
+     * AJAX handler for IP search
+     */
+    public function ajax_search_ip() {
+        // Check nonce
+        check_ajax_referer('ffb_ajax_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized']);
+            return;
+        }
+        
+        $ip = isset($_POST['ip']) ? sanitize_text_field($_POST['ip']) : '';
+        
+        if (empty($ip)) {
+            wp_send_json_error(['message' => 'IP address is required']);
+            return;
+        }
+        
+        // Search for the IP in the cache
+        $geo_data = $this->search_ip_cache($ip);
+        
+        if ($geo_data) {
+            wp_send_json_success([
+                'message' => 'IP found in cache',
+                'data' => $geo_data
+            ]);
+        } else {
+            // Try to fetch from API
+            $geo_data = $this->get_geo_data($ip);
+            
+            if ($geo_data) {
+                wp_send_json_success([
+                    'message' => 'IP data fetched from API',
+                    'data' => $geo_data
+                ]);
+            } else {
+                wp_send_json_error(['message' => 'Unable to retrieve data for this IP']);
+            }
+        }
+    }
+    
+    /**
+     * AJAX handler for deleting an IP from cache
+     */
+    public function ajax_delete_ip() {
+        // Check nonce
+        check_ajax_referer('ffb_ajax_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized']);
+            return;
+        }
+        
+        $ip = isset($_POST['ip']) ? sanitize_text_field($_POST['ip']) : '';
+        
+        if (empty($ip)) {
+            wp_send_json_error(['message' => 'IP address is required']);
+            return;
+        }
+        
+        $result = $this->delete_ip_from_cache($ip);
+        
+        if ($result) {
+            wp_send_json_success(['message' => 'IP removed from cache']);
+        } else {
+            wp_send_json_error(['message' => 'IP not found in cache']);
+        }
+    }
+    
+    /**
+     * AJAX handler for clearing the entire IP cache
+     */
+    public function ajax_clear_cache() {
+        // Check nonce
+        check_ajax_referer('ffb_ajax_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized']);
+            return;
+        }
+        
+        $result = $this->clear_ip_cache();
+        
+        if ($result) {
+            wp_send_json_success(['message' => 'IP cache cleared']);
+        } else {
+            wp_send_json_error(['message' => 'Failed to clear IP cache']);
+        }
+    }
+
+    /**
+     * Test function to check API response format for a specific IP
+     */
+    public function check_api_response_format() {
+        $user_ip = $_SERVER['REMOTE_ADDR'];
+        $api_key = get_option('ffb_api_key', $this->api_key);
+        
+        // Make a direct API call to see the raw response
+        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$api_key}&ip={$user_ip}");
+        
+        if (is_wp_error($geo_data)) {
+            error_log('IPAPI Error: ' . $geo_data->get_error_message());
+            return false;
+        }
+        
+        $body = wp_remote_retrieve_body($geo_data);
+        $geo_data = json_decode($body, true);
+        
+        // Log the complete API response
+        error_log('IPAPI Complete Response for IP ' . $user_ip . ': ' . print_r($geo_data, true));
+        
+        // Check specifically for region/state information
+        if (isset($geo_data['region_code'])) {
+            error_log('IPAPI Region Code: ' . $geo_data['region_code']);
+        }
+        
+        if (isset($geo_data['region'])) {
+            error_log('IPAPI Region: ' . $geo_data['region']);
+        }
+        
+        return $geo_data;
+    }
+
     public function settings_page() {
         // Handle the case where approved_zip_codes is stored in the object but not in options
         $zip_codes = get_option('ffb_approved_zip_codes', $this->approved_zip_codes);
@@ -490,6 +634,35 @@ class FormidableFormsBlocker {
                             <input type="submit" name="ffb_toggle_admin_ip" class="button button-secondary" value="Update IP Block Status" />
                         </p>
                     </form>
+                    
+                    <!-- API Response Test Button -->
+                    <h3>API Response Format Test</h3>
+                    <p>Use this to check how the API is identifying your location:</p>
+                    <form method="post" action="">
+                        <?php wp_nonce_field('ffb_api_test_nonce'); ?>
+                        <p>
+                            <input type="submit" name="ffb_test_api_response" class="button button-secondary" value="Test API Response Format" />
+                        </p>
+                    </form>
+                    <?php
+                    // Handle API test button click
+                    if (isset($_POST['ffb_test_api_response']) && check_admin_referer('ffb_api_test_nonce')) {
+                        $api_response = $this->check_api_response_format();
+                        if ($api_response) {
+                            echo '<div class="notice notice-info"><p>API test completed. Check your server error log for detailed information.</p>';
+                            echo '<p>Your location according to the API:</p>';
+                            echo '<ul>';
+                            echo '<li><strong>Country:</strong> ' . (isset($api_response['country_name']) ? esc_html($api_response['country_name']) : 'Not available') . ' (' . (isset($api_response['country_code']) ? esc_html($api_response['country_code']) : 'N/A') . ')</li>';
+                            echo '<li><strong>Region:</strong> ' . (isset($api_response['region']) ? esc_html($api_response['region']) : 'Not available') . '</li>';
+                            echo '<li><strong>Region Code:</strong> ' . (isset($api_response['region_code']) ? esc_html($api_response['region_code']) : 'Not available') . '</li>';
+                            echo '<li><strong>ZIP/Postal Code:</strong> ' . (isset($api_response['postal']) ? esc_html($api_response['postal']) : 'Not available') . '</li>';
+                            echo '</ul>';
+                            echo '</div>';
+                        } else {
+                            echo '<div class="notice notice-error"><p>API test failed. Check your server error log for more information.</p></div>';
+                        }
+                    }
+                    ?>
                 </div>
             </div>
             
@@ -633,6 +806,167 @@ class FormidableFormsBlocker {
                                         error: function(xhr, status, error) {
                                             resultContainer.removeClass('success').addClass('error')
                                                 .text('Error testing API key: ' + error);
+                                        }
+                                    });
+                                });
+                            });
+                            </script>
+                        </td>
+                    </tr>
+                </table>
+                
+                <h2>IP Cache Management</h2>
+                <p>Manage the IP geolocation cache to reduce API calls.</p>
+                <table class="form-table">
+                    <tr valign="top">
+                        <th scope="row">Cache Statistics</th>
+                        <td>
+                            <?php
+                            $cached_data = get_option('ffb_ip_cache', []);
+                            $cache_count = count($cached_data);
+                            ?>
+                            <div class="ffb-cache-stats">
+                                <span class="ffb-cache-count"><?php echo $cache_count; ?></span>
+                                <span class="ffb-cache-label">IP addresses currently cached</span>
+                                <p>Caching IP geolocation data reduces API calls and improves form submission speed.</p>
+                                <button type="button" id="ffb_clear_cache" class="button button-secondary">Clear All Cached IPs</button>
+                            </div>
+                            <script>
+                            jQuery(document).ready(function($) {
+                                $('#ffb_clear_cache').click(function() {
+                                    if (confirm('Are you sure you want to clear all cached IP data? This will force the plugin to make new API calls for each IP.')) {
+                                        $.ajax({
+                                            type: 'POST',
+                                            url: '<?php echo admin_url('admin-ajax.php'); ?>',
+                                            data: {
+                                                action: 'ffb_clear_cache',
+                                                nonce: '<?php echo wp_create_nonce('ffb_ajax_nonce'); ?>'
+                                            },
+                                            success: function(response) {
+                                                if (response.success) {
+                                                    alert('IP cache cleared');
+                                                    location.reload();
+                                                } else {
+                                                    alert('Error: ' + response.data.message);
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+                            });
+                            </script>
+                        </td>
+                    </tr>
+                </table>
+                
+                <h2>IP Search</h2>
+                <p>Search for an IP address to view its geolocation data.</p>
+                <table class="form-table">
+                    <tr valign="top">
+                        <th scope="row">IP Address</th>
+                        <td>
+                            <input type="text" id="ffb_ip_search" name="ffb_ip_search" value="" style="width: 300px;" />
+                            <button type="button" id="ffb_search_ip" class="button button-secondary" style="margin-left: 10px;">Search</button>
+                            <div id="ffb_ip_search_results"></div>
+                            <script>
+                            jQuery(document).ready(function($) {
+                                $('#ffb_search_ip').click(function() {
+                                    var ip = $('#ffb_ip_search').val();
+                                    var resultContainer = $('#ffb_ip_search_results');
+                                    
+                                    // Show loading indicator
+                                    resultContainer.html('<p>Loading...</p>');
+                                    
+                                    $.ajax({
+                                        type: 'POST',
+                                        url: '<?php echo admin_url('admin-ajax.php'); ?>',
+                                        data: {
+                                            action: 'ffb_search_ip',
+                                            ip: ip,
+                                            nonce: '<?php echo wp_create_nonce('ffb_ajax_nonce'); ?>'
+                                        },
+                                        success: function(response) {
+                                            if (response.success) {
+                                                var data = response.data;
+                                                var html = '<div style="margin-top: 15px; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 3px;">';
+                                                html += '<h3>IP Information: ' + ip + '</h3>';
+                                                html += '<table class="widefat" style="margin-bottom: 15px;">';
+                                                html += '<tr><td><strong>Country:</strong></td><td>' + (data.data.country_name || 'N/A') + ' (' + (data.data.country_code || 'N/A') + ')</td></tr>';
+                                                html += '<tr><td><strong>Region:</strong></td><td>' + (data.data.region || 'N/A') + '</td></tr>';
+                                                html += '<tr><td><strong>City:</strong></td><td>' + (data.data.city || 'N/A') + '</td></tr>';
+                                                html += '<tr><td><strong>ZIP:</strong></td><td>' + (data.data.postal || 'N/A') + '</td></tr>';
+                                                html += '<tr><td><strong>Latitude:</strong></td><td>' + (data.data.latitude || 'N/A') + '</td></tr>';
+                                                html += '<tr><td><strong>Longitude:</strong></td><td>' + (data.data.longitude || 'N/A') + '</td></tr>';
+                                                html += '</table>';
+                                                
+                                                // Add buttons for actions
+                                                html += '<button type="button" class="button button-secondary ffb-delete-ip" data-ip="' + ip + '">Remove from Cache</button>';
+                                                html += '<button type="button" class="button button-primary ffb-allow-ip" data-ip="' + ip + '" style="margin-left: 10px;">Allow this IP</button>';
+                                                html += '<button type="button" class="button button-secondary ffb-block-ip" data-ip="' + ip + '" style="margin-left: 10px; background: #d63638; color: white; border-color: #d63638;">Block this IP</button>';
+                                                html += '</div>';
+                                                
+                                                resultContainer.html(html);
+                                                
+                                                // Add event handlers for the buttons
+                                                $('.ffb-delete-ip').click(function() {
+                                                    var ip = $(this).data('ip');
+                                                    if (confirm('Are you sure you want to remove this IP from the cache?')) {
+                                                        $.ajax({
+                                                            type: 'POST',
+                                                            url: '<?php echo admin_url('admin-ajax.php'); ?>',
+                                                            data: {
+                                                                action: 'ffb_delete_ip',
+                                                                ip: ip,
+                                                                nonce: '<?php echo wp_create_nonce('ffb_ajax_nonce'); ?>'
+                                                            },
+                                                            success: function(response) {
+                                                                if (response.success) {
+                                                                    alert('IP removed from cache');
+                                                                    $('#ffb_ip_search_results').html('');
+                                                                } else {
+                                                                    alert('Error: ' + response.data.message);
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                });
+                                                
+                                                $('.ffb-block-ip').click(function() {
+                                                    var ip = $(this).data('ip');
+                                                    var blockedIps = $('#ffb_blocked_ips').val();
+                                                    var blockedIpsArray = blockedIps ? blockedIps.split(',').map(function(item) { return item.trim(); }) : [];
+                                                    
+                                                    // Add the IP to blocked IPs if it's not already there
+                                                    if (blockedIpsArray.indexOf(ip) === -1) {
+                                                        blockedIpsArray.push(ip);
+                                                        $('#ffb_blocked_ips').val(blockedIpsArray.join(', '));
+                                                        alert('IP added to blocked list. Remember to save your settings!');
+                                                    } else {
+                                                        alert('This IP is already in the blocked list.');
+                                                    }
+                                                });
+                                                
+                                                $('.ffb-allow-ip').click(function() {
+                                                    var ip = $(this).data('ip');
+                                                    var blockedIps = $('#ffb_blocked_ips').val();
+                                                    var blockedIpsArray = blockedIps.split(',').map(function(item) { return item.trim(); });
+                                                    
+                                                    // Remove the IP from blocked IPs if it's there
+                                                    var index = blockedIpsArray.indexOf(ip);
+                                                    if (index !== -1) {
+                                                        blockedIpsArray.splice(index, 1);
+                                                        $('#ffb_blocked_ips').val(blockedIpsArray.join(','));
+                                                        alert('IP removed from blocked list. Remember to save your settings!');
+                                                    } else {
+                                                        alert('This IP is not in the blocked list.');
+                                                    }
+                                                });
+                                            } else {
+                                                resultContainer.html('<p>Error: ' + response.data.message + '</p>');
+                                            }
+                                        },
+                                        error: function(xhr, status, error) {
+                                            resultContainer.html('<p>Error: ' + error + '</p>');
                                         }
                                     });
                                 });
@@ -799,6 +1133,89 @@ class FormidableFormsBlocker {
         <?php
     }
 
+    /**
+     * Get geolocation data for an IP address, using cache when available
+     */
+    private function get_geo_data($ip) {
+        // Check if we have cached data for this IP
+        $cached_data = get_option('ffb_ip_cache', []);
+        
+        if (isset($cached_data[$ip])) {
+            // We have cached data, return it
+            return $cached_data[$ip];
+        }
+        
+        // No cached data, fetch from API
+        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$this->api_key}&ip={$ip}");
+        
+        // Check for API errors
+        if (is_wp_error($geo_data)) {
+            error_log('IPAPI Error: ' . $geo_data->get_error_message());
+            return false;
+        }
+        
+        $body = wp_remote_retrieve_body($geo_data);
+        $geo_data = json_decode($body, true);
+        
+        // Log the geo data for debugging
+        error_log('IPAPI Response for IP ' . $ip . ': ' . print_r($geo_data, true));
+        
+        // Check if API returned an error
+        if (isset($geo_data['success']) && $geo_data['success'] === false) {
+            $error_message = isset($geo_data['error']['info']) ? $geo_data['error']['info'] : 'Unknown API error';
+            error_log('IPAPI Error: ' . $error_message);
+            return false;
+        }
+        
+        // Ensure we have a standardized region code for state validation
+        if (isset($geo_data['region_code']) && !isset($geo_data['region'])) {
+            $geo_data['region'] = $geo_data['region_code'];
+        } else if (isset($geo_data['region']) && !isset($geo_data['region_code'])) {
+            $geo_data['region_code'] = $geo_data['region'];
+        }
+        
+        // Cache the data
+        $cached_data[$ip] = $geo_data;
+        update_option('ffb_ip_cache', $cached_data);
+        
+        return $geo_data;
+    }
+
+    /**
+     * Clear the IP cache
+     */
+    public function clear_ip_cache() {
+        delete_option('ffb_ip_cache');
+        return true;
+    }
+    
+    /**
+     * Search for an IP in the cache
+     */
+    public function search_ip_cache($ip) {
+        $cached_data = get_option('ffb_ip_cache', []);
+        
+        if (isset($cached_data[$ip])) {
+            return $cached_data[$ip];
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Delete an IP from the cache
+     */
+    public function delete_ip_from_cache($ip) {
+        $cached_data = get_option('ffb_ip_cache', []);
+        
+        if (isset($cached_data[$ip])) {
+            unset($cached_data[$ip]);
+            update_option('ffb_ip_cache', $cached_data);
+            return true;
+        }
+        
+        return false;
+    }
 }
 
 new FormidableFormsBlocker();

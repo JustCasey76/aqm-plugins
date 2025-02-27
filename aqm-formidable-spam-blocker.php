@@ -3,7 +3,7 @@
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
  * Description: Block form submissions based on IP, state, or ZIP code.
- * Version: 1.6.7
+ * Version: 1.6.8
  * Author: AQ Marketing
  * Author URI: https://aqmarketing.com
  */
@@ -86,8 +86,8 @@ class FormidableFormsBlocker {
     }
 
     public function enqueue_scripts() {
-        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.6.7', true);
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.7');
+        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.6.8', true);
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.8');
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
             'api_url' => 'https://api.ipapi.com/check?access_key=' . $this->api_key . '&ip=',
             'approved_states' => $this->approved_states,
@@ -145,8 +145,8 @@ class FormidableFormsBlocker {
             // Make sure approved_states is an array of trimmed values
             $approved_states = array_map('trim', $this->approved_states);
             
-            if ($geo_data && isset($geo_data['region'])) {
-                $region_code = trim($geo_data['region']);
+            if ($geo_data && (isset($geo_data['region']) || isset($geo_data['region_code']))) {
+                $region_code = trim($geo_data['region'] ?? $geo_data['region_code']);
                 
                 // Debug log
                 error_log('Checking state: ' . $region_code . ' against approved states: ' . implode(',', $approved_states));
@@ -238,7 +238,7 @@ class FormidableFormsBlocker {
         
         $country = isset($geo_data['country_name']) ? $geo_data['country_name'] : '';
         $region = isset($geo_data['region']) ? $geo_data['region'] : '';
-        $region_code = isset($geo_data['region']) ? $geo_data['region'] : '';
+        $region_code = isset($geo_data['region_code']) ? $geo_data['region_code'] : '';
         $zip = isset($geo_data['postal']) ? $geo_data['postal'] : '';
         
         $wpdb->insert($table_name, [
@@ -270,6 +270,11 @@ class FormidableFormsBlocker {
         
         $geo_data = $this->get_geo_data($user_ip);
         
+        // DEBUG: Log geo data for troubleshooting
+        error_log('FFB Debug - IP: ' . $user_ip);
+        error_log('FFB Debug - Geo Data: ' . print_r($geo_data, true));
+        error_log('FFB Debug - Approved States: ' . print_r($this->approved_states, true));
+        
         // Check if we should block non-US IPs
         if (get_option('ffb_block_non_us', '1') === '1') {
             if ($geo_data && isset($geo_data['country_code']) && $geo_data['country_code'] !== 'US') {
@@ -280,10 +285,16 @@ class FormidableFormsBlocker {
         }
         
         // Only check state if we have approved states configured
-        if (!empty($this->approved_states) && $geo_data && isset($geo_data['region']) && !in_array($geo_data['region'], $this->approved_states)) {
-            // Replace any Formidable Forms with a message
-            $content = preg_replace('/\[formidable.*?\]/', '<p class="ffb-blocked-message">Forms are not available in your state.</p>', $content);
-            return $content;
+        if (!empty($this->approved_states) && $geo_data && (isset($geo_data['region']) || isset($geo_data['region_code']))) {
+            // DEBUG: Log state comparison
+            error_log('FFB Debug - User Region: ' . ($geo_data['region'] ?? $geo_data['region_code']));
+            error_log('FFB Debug - Region in approved states: ' . (in_array($geo_data['region'] ?? $geo_data['region_code'], $this->approved_states) ? 'YES' : 'NO'));
+            
+            if (!in_array($geo_data['region'] ?? $geo_data['region_code'], $this->approved_states)) {
+                // Replace any Formidable Forms with a message
+                $content = preg_replace('/\[formidable.*?\]/', '<p class="ffb-blocked-message">Forms are not available in your state.</p>', $content);
+                return $content;
+            }
         }
         
         // Check ZIP code if we have approved ZIP codes configured
@@ -294,6 +305,10 @@ class FormidableFormsBlocker {
             if (strlen($postal_code) > 5) {
                 $postal_code = substr($postal_code, 0, 5);
             }
+            
+            // DEBUG: Log ZIP code comparison
+            error_log('FFB Debug - User Postal Code: ' . $postal_code);
+            error_log('FFB Debug - Postal in approved codes: ' . (in_array($postal_code, $this->approved_zip_codes) ? 'YES' : 'NO'));
             
             if (!in_array($postal_code, $this->approved_zip_codes)) {
                 // Replace any Formidable Forms with a message
@@ -510,6 +525,39 @@ class FormidableFormsBlocker {
         }
     }
 
+    /**
+     * Test function to check API response format for a specific IP
+     */
+    public function check_api_response_format() {
+        $user_ip = $_SERVER['REMOTE_ADDR'];
+        $api_key = get_option('ffb_api_key', $this->api_key);
+        
+        // Make a direct API call to see the raw response
+        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$api_key}&ip={$user_ip}");
+        
+        if (is_wp_error($geo_data)) {
+            error_log('IPAPI Error: ' . $geo_data->get_error_message());
+            return false;
+        }
+        
+        $body = wp_remote_retrieve_body($geo_data);
+        $geo_data = json_decode($body, true);
+        
+        // Log the complete API response
+        error_log('IPAPI Complete Response for IP ' . $user_ip . ': ' . print_r($geo_data, true));
+        
+        // Check specifically for region/state information
+        if (isset($geo_data['region_code'])) {
+            error_log('IPAPI Region Code: ' . $geo_data['region_code']);
+        }
+        
+        if (isset($geo_data['region'])) {
+            error_log('IPAPI Region: ' . $geo_data['region']);
+        }
+        
+        return $geo_data;
+    }
+
     public function settings_page() {
         // Handle the case where approved_zip_codes is stored in the object but not in options
         $zip_codes = get_option('ffb_approved_zip_codes', $this->approved_zip_codes);
@@ -586,6 +634,35 @@ class FormidableFormsBlocker {
                             <input type="submit" name="ffb_toggle_admin_ip" class="button button-secondary" value="Update IP Block Status" />
                         </p>
                     </form>
+                    
+                    <!-- API Response Test Button -->
+                    <h3>API Response Format Test</h3>
+                    <p>Use this to check how the API is identifying your location:</p>
+                    <form method="post" action="">
+                        <?php wp_nonce_field('ffb_api_test_nonce'); ?>
+                        <p>
+                            <input type="submit" name="ffb_test_api_response" class="button button-secondary" value="Test API Response Format" />
+                        </p>
+                    </form>
+                    <?php
+                    // Handle API test button click
+                    if (isset($_POST['ffb_test_api_response']) && check_admin_referer('ffb_api_test_nonce')) {
+                        $api_response = $this->check_api_response_format();
+                        if ($api_response) {
+                            echo '<div class="notice notice-info"><p>API test completed. Check your server error log for detailed information.</p>';
+                            echo '<p>Your location according to the API:</p>';
+                            echo '<ul>';
+                            echo '<li><strong>Country:</strong> ' . (isset($api_response['country_name']) ? esc_html($api_response['country_name']) : 'Not available') . ' (' . (isset($api_response['country_code']) ? esc_html($api_response['country_code']) : 'N/A') . ')</li>';
+                            echo '<li><strong>Region:</strong> ' . (isset($api_response['region']) ? esc_html($api_response['region']) : 'Not available') . '</li>';
+                            echo '<li><strong>Region Code:</strong> ' . (isset($api_response['region_code']) ? esc_html($api_response['region_code']) : 'Not available') . '</li>';
+                            echo '<li><strong>ZIP/Postal Code:</strong> ' . (isset($api_response['postal']) ? esc_html($api_response['postal']) : 'Not available') . '</li>';
+                            echo '</ul>';
+                            echo '</div>';
+                        } else {
+                            echo '<div class="notice notice-error"><p>API test failed. Check your server error log for more information.</p></div>';
+                        }
+                    }
+                    ?>
                 </div>
             </div>
             
@@ -1088,6 +1165,13 @@ class FormidableFormsBlocker {
             $error_message = isset($geo_data['error']['info']) ? $geo_data['error']['info'] : 'Unknown API error';
             error_log('IPAPI Error: ' . $error_message);
             return false;
+        }
+        
+        // Ensure we have a standardized region code for state validation
+        if (isset($geo_data['region_code']) && !isset($geo_data['region'])) {
+            $geo_data['region'] = $geo_data['region_code'];
+        } else if (isset($geo_data['region']) && !isset($geo_data['region_code'])) {
+            $geo_data['region_code'] = $geo_data['region'];
         }
         
         // Cache the data

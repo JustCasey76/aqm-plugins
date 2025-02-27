@@ -2,6 +2,15 @@
 
 All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin will be documented in this file.
 
+## [1.6.8] - 2025-02-26
+
+### Fixed
+- Fixed state validation to check both region and region_code fields from the API
+- Added debugging tools to troubleshoot geolocation issues
+- Added API response format test in admin panel
+- Improved error handling and logging for geolocation
+- Enhanced state and ZIP code comparison logic
+
 ## [1.6.7] - 2023-05-15
 
 ### Fixed
