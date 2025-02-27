@@ -89,10 +89,25 @@ class FormidableFormsBlocker {
     public function enqueue_scripts() {
         wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.7.0', true);
         wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.7.0');
+        
+        // Make sure approved states are properly formatted
+        $approved_states = $this->approved_states;
+        if (!is_array($approved_states)) {
+            $approved_states = explode(',', $approved_states);
+        }
+        
+        // Clean up each state code
+        $approved_states = array_map(function($state) {
+            return trim(strtoupper($state));
+        }, $approved_states);
+        
+        // Debug log
+        error_log('FFB: Passing approved states to JS: ' . implode(',', $approved_states));
+        
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
             'api_url' => 'https://api.ipapi.com/api/',
             'api_key' => get_option('ffb_api_key', $this->api_key),
-            'approved_states' => $this->approved_states,
+            'approved_states' => $approved_states,
             'approved_zip_codes' => $this->approved_zip_codes,
             'block_non_us' => get_option('ffb_block_non_us', '1') === '1'
         ]);

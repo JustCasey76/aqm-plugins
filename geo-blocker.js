@@ -114,25 +114,55 @@
                             region_code = stateMap[region_name.toLowerCase()] || region_name;
                         }
                         
+                        // Debug: Show the complete response object
+                        console.log('Complete API response:', JSON.stringify(response));
+                        
                         if (region_code) {
                             var approved_states = ffbGeoBlocker.approved_states;
                             
                             console.log('Checking state:', region_code);
                             console.log('Region name from API:', region_name);
-                            console.log('Approved states:', approved_states);
+                            console.log('Approved states (raw):', ffbGeoBlocker.approved_states);
+                            console.log('Approved states (processed):', approved_states);
+                            
+                            // Debug: Show each approved state individually
+                            for (var i = 0; i < approved_states.length; i++) {
+                                console.log('Approved state ' + i + ':', approved_states[i]);
+                            }
                             
                             // Check if the state is in the approved list (case insensitive)
                             var stateApproved = false;
-                            for (var i = 0; i < approved_states.length; i++) {
-                                var approvedState = approved_states[i].trim();
-                                console.log('Comparing:', region_code.toUpperCase(), 'with', approvedState.toUpperCase());
+                            
+                            // Special check for Massachusetts
+                            if (region_code.toUpperCase() === 'MA' || 
+                                region_name.toUpperCase() === 'MASSACHUSETTS' || 
+                                region_code.toUpperCase() === 'MASSACHUSETTS') {
+                                console.log('MASSACHUSETTS DETECTED - checking if in approved list');
                                 
-                                // Check for both the code and full name
-                                if (approvedState.toUpperCase() === region_code.toUpperCase() || 
-                                    (region_name && region_name.toUpperCase() === approvedState.toUpperCase()) ||
-                                    (stateMap[approvedState.toLowerCase()] === region_code.toUpperCase())) {
-                                    stateApproved = true;
-                                    break;
+                                // Check if MA is in the approved list
+                                for (var i = 0; i < approved_states.length; i++) {
+                                    if (approved_states[i].toUpperCase() === 'MA') {
+                                        console.log('MA is in the approved list - allowing access');
+                                        stateApproved = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // Regular check for other states
+                            if (!stateApproved) {
+                                for (var i = 0; i < approved_states.length; i++) {
+                                    var approvedState = approved_states[i].trim();
+                                    console.log('Comparing:', region_code.toUpperCase(), 'with', approvedState.toUpperCase());
+                                    
+                                    // Check for both the code and full name
+                                    if (approvedState.toUpperCase() === region_code.toUpperCase() || 
+                                        (region_name && region_name.toUpperCase() === approvedState.toUpperCase()) ||
+                                        (stateMap[approvedState.toLowerCase()] === region_code.toUpperCase())) {
+                                        stateApproved = true;
+                                        console.log('MATCH FOUND! State is approved');
+                                        break;
+                                    }
                                 }
                             }
                             
@@ -143,6 +173,8 @@
                                 hideFormidableForms('Forms are not available in your state.');
                                 return;
                             }
+                        } else {
+                            console.log('WARNING: Could not determine region code from API response');
                         }
                     }
                     
