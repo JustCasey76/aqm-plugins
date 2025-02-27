@@ -50,6 +50,36 @@
                         return;
                     }
                 }
+                
+                // Check if ZIP code is in the approved list
+                if (response && response.postal && ffbGeoBlocker.approved_zip_codes.length > 0) {
+                    // Clean the ZIP code (remove spaces, dashes, etc.)
+                    var postal_code = response.postal.replace(/[^0-9]/g, '');
+                    
+                    // Get just the first 5 digits for US ZIP codes
+                    if (postal_code.length > 5) {
+                        postal_code = postal_code.substring(0, 5);
+                    }
+                    
+                    var approved_zip_codes = ffbGeoBlocker.approved_zip_codes;
+                    
+                    console.log('Checking ZIP code:', postal_code);
+                    console.log('Approved ZIP codes:', approved_zip_codes);
+                    
+                    // Check if the ZIP code is not in the approved list
+                    var zipApproved = false;
+                    for (var i = 0; i < approved_zip_codes.length; i++) {
+                        if (approved_zip_codes[i].trim() === postal_code) {
+                            zipApproved = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!zipApproved) {
+                        hideFormidableForms('Forms are not available in your ZIP code.');
+                        return;
+                    }
+                }
             },
             error: function(xhr, status, error) {
                 console.log('Unable to determine location. Error:', error);

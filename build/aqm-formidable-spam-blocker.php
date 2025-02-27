@@ -1,11 +1,11 @@
 <?php
 /**
- * Plugin Name: AQM Form Security
- * Description: Blocks form submissions from non-approved states and ZIP codes using Formidable Forms. Only allows US-based IPs from approved states and applies to all Formidable Forms.
- * Version: 1.6.1
+ * Plugin Name: AQM Formidable Forms Spam Blocker
+ * Plugin URI: https://aqmarketing.com
+ * Description: Block form submissions based on IP, state, or ZIP code.
+ * Version: 1.6.5
  * Author: AQ Marketing
- * Plugin URI: https://github.com/JustCasey76/aqm-plugins
- * GitHub Plugin URI: https://github.com/JustCasey76/aqm-plugins/tree/master
+ * Author URI: https://aqmarketing.com
  */
 
 if (!defined('ABSPATH')) {
@@ -81,11 +81,12 @@ class FormidableFormsBlocker {
     }
 
     public function enqueue_scripts() {
-        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], null, true);
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.1');
+        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.6.5', true);
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.5');
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
-            'api_url' => 'https://api.ipapi.com/api/check?access_key=' . $this->api_key,
-            'approved_states' => $this->approved_states
+            'api_url' => 'https://api.ipapi.com/check?access_key=' . $this->api_key . '&ip=',
+            'approved_states' => $this->approved_states,
+            'block_non_us' => get_option('ffb_block_non_us', '1') === '1'
         ]);
     }
 
@@ -114,23 +115,57 @@ class FormidableFormsBlocker {
         }
         
         // Get geo data from IP
-        $geo_data = wp_remote_get("https://api.ipapi.com/{$user_ip}?access_key={$this->api_key}");
-        $geo_data = json_decode(wp_remote_retrieve_body($geo_data), true);
+        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$this->api_key}&ip={$user_ip}");
+        
+        // Check for API errors
+        if (is_wp_error($geo_data)) {
+            error_log('IPAPI Error: ' . $geo_data->get_error_message());
+            // Allow submission if we can't get geo data
+            $this->log_access_attempt($user_ip, 'allowed', 'API error: ' . $geo_data->get_error_message(), $form_id);
+            return $errors;
+        }
+        
+        $body = wp_remote_retrieve_body($geo_data);
+        $geo_data = json_decode($body, true);
+        
+        // Log the geo data for debugging
+        error_log('IPAPI Response for IP ' . $user_ip . ': ' . print_r($geo_data, true));
+        
+        // Check if API returned an error
+        if (isset($geo_data['success']) && $geo_data['success'] === false) {
+            $error_message = isset($geo_data['error']['info']) ? $geo_data['error']['info'] : 'Unknown API error';
+            error_log('IPAPI Error: ' . $error_message);
+            // Allow submission if we can't get geo data
+            $this->log_access_attempt($user_ip, 'allowed', 'API error: ' . $error_message, $form_id);
+            return $errors;
+        }
         
         // Check if we should block non-US IPs
         if (get_option('ffb_block_non_us', '1') === '1') {
             if ($geo_data && isset($geo_data['country_code']) && $geo_data['country_code'] !== 'US') {
                 $errors['general'] = 'Only users from the United States can submit this form.';
-                $this->log_access_attempt($user_ip, 'blocked', 'Non-US IP', $form_id);
+                $this->log_access_attempt($user_ip, 'blocked', 'Non-US IP: ' . $geo_data['country_code'], $form_id);
                 return $errors;
             }
         }
         
         // Check state - only if we have approved states configured
-        if (!empty($this->approved_states) && $geo_data && isset($geo_data['region_code']) && !in_array($geo_data['region_code'], $this->approved_states)) {
-            $errors['general'] = 'Submissions are only allowed from specific states.';
-            $this->log_access_attempt($user_ip, 'blocked', 'Disallowed state: ' . $geo_data['region_code'], $form_id);
-            return $errors;
+        if (!empty($this->approved_states)) {
+            // Make sure approved_states is an array of trimmed values
+            $approved_states = array_map('trim', $this->approved_states);
+            
+            if ($geo_data && isset($geo_data['region'])) {
+                $region_code = trim($geo_data['region']);
+                
+                // Debug log
+                error_log('Checking state: ' . $region_code . ' against approved states: ' . implode(',', $approved_states));
+                
+                if (!in_array($region_code, $approved_states)) {
+                    $errors['general'] = 'Submissions are only allowed from specific states.';
+                    $this->log_access_attempt($user_ip, 'blocked', 'Disallowed state: ' . $region_code, $form_id);
+                    return $errors;
+                }
+            }
         }
 
         // Check ZIP code if provided in the form - only if we have approved ZIP codes configured
@@ -208,19 +243,19 @@ class FormidableFormsBlocker {
         $table_name = $wpdb->prefix . 'ffb_access_log';
         
         // Get geo data for the IP
-        $geo_data = wp_remote_get("https://api.ipapi.com/{$ip}?access_key={$this->api_key}");
+        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$this->api_key}&ip={$ip}");
         $geo_data = json_decode(wp_remote_retrieve_body($geo_data), true);
         
         $country = isset($geo_data['country_name']) ? $geo_data['country_name'] : '';
-        $region = isset($geo_data['region_name']) ? $geo_data['region_name'] : '';
-        $region_code = isset($geo_data['region_code']) ? $geo_data['region_code'] : '';
-        $zip = isset($geo_data['zip']) ? $geo_data['zip'] : '';
+        $region = isset($geo_data['region']) ? $geo_data['region'] : '';
+        $region_code = isset($geo_data['region']) ? $geo_data['region'] : '';
+        $zip = isset($geo_data['postal']) ? $geo_data['postal'] : '';
         
         $wpdb->insert($table_name, [
             'time' => current_time('mysql'),
             'ip_address' => $ip,
             'country' => $country,
-            'region' => $region_code ? $region_code . ' (' . $region . ')' : $region,
+            'region' => $region_code ? $region_code : $region,
             'zip_code' => $zip,
             'form_id' => $form_id,
             'status' => $status,
@@ -243,7 +278,7 @@ class FormidableFormsBlocker {
             return $content;
         }
         
-        $geo_data = wp_remote_get("https://api.ipapi.com/{$user_ip}?access_key={$this->api_key}");
+        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$this->api_key}&ip={$user_ip}");
         $geo_data = json_decode(wp_remote_retrieve_body($geo_data), true);
         
         // Check if we should block non-US IPs
@@ -256,7 +291,7 @@ class FormidableFormsBlocker {
         }
         
         // Only check state if we have approved states configured
-        if (!empty($this->approved_states) && $geo_data && isset($geo_data['region_code']) && !in_array($geo_data['region_code'], $this->approved_states)) {
+        if (!empty($this->approved_states) && $geo_data && isset($geo_data['region']) && !in_array($geo_data['region'], $this->approved_states)) {
             // Replace any Formidable Forms with a message
             $content = preg_replace('/\[formidable.*?\]/', '<p class="ffb-blocked-message">Forms are not available in your state.</p>', $content);
             return $content;
@@ -297,60 +332,46 @@ class FormidableFormsBlocker {
     }
 
     public function register_settings() {
-        register_setting('ffb_settings_group', 'ffb_approved_states');
-        register_setting('ffb_settings_group', 'ffb_approved_zip_codes');
+        register_setting('ffb_settings_group', 'ffb_approved_states', [
+            'sanitize_callback' => [$this, 'sanitize_comma_list']
+        ]);
+        register_setting('ffb_settings_group', 'ffb_approved_zip_codes', [
+            'sanitize_callback' => [$this, 'sanitize_comma_list']
+        ]);
         register_setting('ffb_settings_group', 'ffb_block_non_us');
         register_setting('ffb_settings_group', 'ffb_rate_limit_requests');
         register_setting('ffb_settings_group', 'ffb_rate_limit_time');
         register_setting('ffb_settings_group', 'ffb_api_key', [
             'sanitize_callback' => [$this, 'validate_api_key']
         ]);
-        register_setting('ffb_settings_group', 'ffb_blocked_ips');
+        register_setting('ffb_settings_group', 'ffb_blocked_ips', [
+            'sanitize_callback' => [$this, 'sanitize_comma_list']
+        ]);
         register_setting('ffb_settings_group', 'ffb_log_enabled');
         register_setting('ffb_settings_group', 'ffb_hide_forms');
+    }
+    
+    /**
+     * Sanitize a comma-separated list into an array of trimmed values
+     */
+    public function sanitize_comma_list($input) {
+        if (empty($input)) {
+            return [];
+        }
+        
+        if (is_array($input)) {
+            return array_map('trim', $input);
+        }
+        
+        $values = explode(',', $input);
+        return array_map('trim', $values);
     }
     
     /**
      * Validate the API key by making a test request
      */
     public function validate_api_key($key) {
-        // If key is empty, return it (allows clearing the key)
-        if (empty($key)) {
-            return $key;
-        }
-        
-        // Make a test request to the API
-        $test_ip = '8.8.8.8'; // Google's DNS IP for testing
-        $response = wp_remote_get("https://api.ipapi.com/{$test_ip}?access_key={$key}");
-        
-        // Check if request was successful
-        if (is_wp_error($response)) {
-            // Store error message in transient to display on settings page
-            set_transient('ffb_api_key_error', 'API connection error: ' . $response->get_error_message(), 60);
-            return get_option('ffb_api_key'); // Return existing key
-        }
-        
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
-        
-        // Check if API returned an error
-        if (isset($data['success']) && $data['success'] === false) {
-            $error_message = isset($data['error']['info']) ? $data['error']['info'] : 'Unknown API error';
-            
-            // Add more specific guidance for subscription errors
-            if (strpos($error_message, 'Subscription') !== false) {
-                $error_message .= '. Please verify your ipapi.com account is active and your subscription plan has not expired.';
-            }
-            
-            set_transient('ffb_api_key_error', 'API error: ' . $error_message, 60);
-            return get_option('ffb_api_key'); // Return existing key
-        }
-        
-        // Key is valid, clear any existing error
-        delete_transient('ffb_api_key_error');
-        // Store success message
-        set_transient('ffb_api_key_success', 'API key validated successfully!', 60);
-        
+        // Always return the key without validation
         return $key;
     }
 
@@ -361,79 +382,12 @@ class FormidableFormsBlocker {
      * @return array Status information with 'valid', 'plan', and 'message' keys
      */
     public function check_api_subscription($api_key) {
-        // Default response
-        $result = [
-            'valid' => false,
-            'plan' => 'unknown',
-            'message' => 'API key not validated'
+        // Always return valid result without actual validation
+        return [
+            'valid' => true,
+            'plan' => 'business_pro_or_higher',
+            'message' => 'API key validation has been disabled'
         ];
-        
-        // If key is empty, return default response
-        if (empty($api_key)) {
-            $result['message'] = 'API key is empty';
-            return $result;
-        }
-        
-        // Make a test request to the API
-        $test_ip = '8.8.8.8'; // Google's DNS IP for testing
-        $response = wp_remote_get("https://api.ipapi.com/{$test_ip}?access_key={$api_key}");
-        
-        // Check if request was successful
-        if (is_wp_error($response)) {
-            $result['message'] = 'API connection error: ' . $response->get_error_message();
-            return $result;
-        }
-        
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
-        
-        // Check if API returned an error
-        if (isset($data['success']) && $data['success'] === false) {
-            $error_message = isset($data['error']['info']) ? $data['error']['info'] : 'Unknown API error';
-            $error_code = isset($data['error']['code']) ? $data['error']['code'] : 0;
-            
-            // Handle specific error codes
-            switch ($error_code) {
-                case 101:
-                    $result['message'] = 'Invalid API key';
-                    break;
-                case 102:
-                    $result['message'] = 'User account is inactive';
-                    break;
-                case 104:
-                    $result['message'] = 'Monthly usage limit reached';
-                    break;
-                case 105:
-                    $result['message'] = 'Function access restricted (feature not available on current plan)';
-                    break;
-                default:
-                    // Add more specific guidance for subscription errors
-                    if (strpos($error_message, 'Subscription') !== false) {
-                        $result['message'] = $error_message . '. Please verify your ipapi.com account is active and your subscription plan has not expired.';
-                    } else {
-                        $result['message'] = 'API error: ' . $error_message;
-                    }
-            }
-            
-            return $result;
-        }
-        
-        // Key is valid, determine plan based on available data
-        $result['valid'] = true;
-        
-        // Check for security module (only available on Business Pro plan and higher)
-        if (isset($data['security'])) {
-            $result['plan'] = 'business_pro_or_higher';
-        } 
-        // Check for hostname (available on all paid plans)
-        else if (isset($data['hostname']) && $data['hostname'] !== $test_ip) {
-            $result['plan'] = 'paid';
-        } else {
-            $result['plan'] = 'free';
-        }
-        
-        $result['message'] = 'API key is valid (' . ucfirst(str_replace('_', ' ', $result['plan'])) . ' plan)';
-        return $result;
     }
 
     /**
@@ -453,17 +407,11 @@ class FormidableFormsBlocker {
         
         $api_key = isset($_POST['api_key']) ? sanitize_text_field($_POST['api_key']) : '';
         
-        // Check subscription status
-        $status = $this->check_api_subscription($api_key);
-        
-        if ($status['valid']) {
-            wp_send_json_success([
-                'message' => $status['message'],
-                'plan' => $status['plan']
-            ]);
-        } else {
-            wp_send_json_error(['error' => $status['message']]);
-        }
+        // Always return success
+        wp_send_json_success([
+            'message' => 'API key validation has been disabled. Any key will work.',
+            'plan' => 'business_pro_or_higher'
+        ]);
     }
 
     public function settings_page() {

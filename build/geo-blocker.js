@@ -13,19 +13,48 @@
             method: 'GET',
             dataType: 'json',
             success: function(response) {
-                if (response && response.country_code && response.country_code !== 'US') {
+                console.log('IPAPI Response:', response);
+                
+                // Check for API errors
+                if (response && response.success === false) {
+                    console.log('IPAPI Error:', response.error ? response.error.info : 'Unknown error');
+                    return; // Allow form access if we can't determine location
+                }
+                
+                // Check if we should block non-US IPs
+                if (ffbGeoBlocker.block_non_us && response && response.country_code && response.country_code !== 'US') {
                     hideFormidableForms('Forms are not available in your country.');
                     return;
                 }
-
-                if (response && response.region_code && 
-                    ffbGeoBlocker.approved_states.indexOf(response.region_code) === -1) {
-                    hideFormidableForms('Forms are not available in your state.');
-                    return;
+                
+                // Check if state is in the approved list
+                if (response && response.region && ffbGeoBlocker.approved_states.length > 0) {
+                    // Convert region to uppercase for consistent comparison
+                    var region_code = response.region.trim();
+                    var approved_states = ffbGeoBlocker.approved_states;
+                    
+                    console.log('Checking state:', region_code);
+                    console.log('Approved states:', approved_states);
+                    
+                    // Check if the state is not in the approved list
+                    var stateApproved = false;
+                    for (var i = 0; i < approved_states.length; i++) {
+                        if (approved_states[i].trim() === region_code) {
+                            stateApproved = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!stateApproved) {
+                        hideFormidableForms('Forms are not available in your state.');
+                        return;
+                    }
                 }
             },
-            error: function() {
-                console.log('Unable to determine location. Allowing form access by default.');
+            error: function(xhr, status, error) {
+                console.log('Unable to determine location. Error:', error);
+                console.log('Response:', xhr.responseText);
+                // Allow form access by default if we can't determine location
             }
         });
     }
