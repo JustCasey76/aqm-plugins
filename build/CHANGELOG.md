@@ -1,5 +1,11 @@
 # AQM Formidable Forms Spam Blocker Changelog
 
+## 1.9.3 - February 27, 2025
+- Fixed issue with "Test Blocking with Your IP" feature where forms were still being hidden when testing
+- Added persistent checkbox state for "Block my IP address for testing purposes" option
+- Improved test mode detection to ensure forms remain visible during testing
+- Enhanced JavaScript test mode handling with localStorage
+
 ## 1.9.2 - February 27, 2025
 - Fixed form visibility issue where forms would remain hidden even when in approved locations
 - Improved form content preservation when toggling visibility

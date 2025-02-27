@@ -3,7 +3,7 @@
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
  * Description: Block form submissions from specific countries, states, and zip codes.
- * $11.9.2
+ * Version: 1.9.3
  * Author: AQMarketing
  * Author URI: https://aqmarketing.com
  * Text Domain: aqm-formidable-spam-blocker
@@ -136,10 +136,10 @@ class FormidableFormsBlocker {
         wp_enqueue_script('jquery');
         
         // Enqueue the geo-blocker script
-        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', array('jquery'), '1.9.2', true);
+        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', array('jquery'), '1.9.3', true);
         
         // Enqueue the styles
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', array(), '1.9.2');
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', array(), '1.9.3');
         
         // Localize the script with necessary data
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', array(
@@ -150,7 +150,8 @@ class FormidableFormsBlocker {
             'approved_zip_codes' => $approved_zip_codes,
             'block_non_us' => get_option('ffb_block_non_us', '1') === '1',
             'zip_validation_enabled' => $zip_validation_enabled,
-            'is_admin' => current_user_can('manage_options')
+            'is_admin' => current_user_can('manage_options'),
+            'testing_own_ip' => in_array($_SERVER['REMOTE_ADDR'], $this->blocked_ips)
         ));
     }
 
@@ -791,6 +792,39 @@ class FormidableFormsBlocker {
             rocket_clean_domain();
             echo '<div class="notice notice-success is-dismissible"><p>WP Rocket cache cleared successfully!</p></div>';
         }
+        
+        // Handle toggling admin IP for testing
+        if (isset($_POST['ffb_toggle_admin_ip']) && check_admin_referer('ffb_toggle_admin_ip_nonce')) {
+            $blocked_ips = get_option('ffb_blocked_ips', []);
+            if (!is_array($blocked_ips)) {
+                $blocked_ips = explode(',', $blocked_ips);
+                $blocked_ips = array_map('trim', $blocked_ips);
+            }
+            
+            $admin_ip = $_SERVER['REMOTE_ADDR'];
+            
+            if (isset($_POST['ffb_block_admin_ip'])) {
+                // Add admin IP to blocked list if not already there
+                if (!in_array($admin_ip, $blocked_ips)) {
+                    $blocked_ips[] = $admin_ip;
+                    update_option('ffb_blocked_ips', $blocked_ips);
+                    echo '<div class="notice notice-success is-dismissible"><p>Your IP address has been added to the blocked list for testing.</p></div>';
+                }
+            } else {
+                // Remove admin IP from blocked list
+                $blocked_ips = array_diff($blocked_ips, [$admin_ip]);
+                update_option('ffb_blocked_ips', $blocked_ips);
+                echo '<div class="notice notice-success is-dismissible"><p>Your IP address has been removed from the blocked list.</p></div>';
+            }
+            
+            // Update the class property to reflect the changes
+            $this->blocked_ips = $blocked_ips;
+        }
+        
+        if (isset($_POST['ffb_test_api_response']) && check_admin_referer('ffb_api_test_nonce')) {
+            $this->check_api_response_format();
+        }
+        
         ?>
         <div class="wrap">
             <h1>AQM Form Security Settings</h1>
@@ -833,12 +867,6 @@ class FormidableFormsBlocker {
                             <input type="submit" name="ffb_test_api_response" class="button button-secondary" value="Test API Response Format" />
                         </p>
                     </form>
-                    <?php
-                    // Handle API test button click
-                    if (isset($_POST['ffb_test_api_response']) && check_admin_referer('ffb_api_test_nonce')) {
-                        $this->check_api_response_format();
-                    }
-                    ?>
                 </div>
             </div>
             

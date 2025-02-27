@@ -1,7 +1,7 @@
 /**
  * Formidable Forms Geo-Blocker JavaScript
  * Handles client-side geo-blocking for Formidable Forms
- * Version: 1.9.2
+ * Version: 1.9.3
  */
 
 (function($) {
@@ -252,6 +252,13 @@
     function applyAccessRules(locationInfo) {
         console.log('Applying access rules based on location:', locationInfo);
         
+        // Skip all blocking rules if testing with own IP
+        if (ffbGeoBlocker.is_admin && localStorage.getItem('ffb_testing_own_ip') === 'true') {
+            console.log('Test mode active - skipping blocking rules');
+            showFormidableForms();
+            return;
+        }
+        
         // Check if we should block non-US IPs
         if (ffbGeoBlocker.block_non_us && !locationInfo.isUS) {
             console.log('Blocking due to non-US country');
@@ -342,6 +349,14 @@
         // Add a timestamp to avoid browser caching
         console.log('Initializing geo-blocker.js at ' + new Date().toISOString());
         console.log('ffbGeoBlocker object:', ffbGeoBlocker);
+        
+        // Check if we're in test mode with admin's IP
+        if (ffbGeoBlocker.is_admin && ffbGeoBlocker.testing_own_ip) {
+            console.log('Admin is testing with their own IP - enabling test mode');
+            localStorage.setItem('ffb_testing_own_ip', 'true');
+        } else {
+            localStorage.removeItem('ffb_testing_own_ip');
+        }
         
         // Add debug button for troubleshooting (only visible in admin mode)
         if (ffbGeoBlocker.is_admin) {
