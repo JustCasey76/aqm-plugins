@@ -75,9 +75,10 @@
             
             // Now call the geolocation API with the correct URL format
             $.ajax({
-                url: ffbGeoBlocker.api_url + userIp + '?access_key=' + ffbGeoBlocker.api_key,
+                url: ffbGeoBlocker.api_url + userIp + '?access_key=' + ffbGeoBlocker.api_key + '&_nocache=' + new Date().getTime(),
                 method: 'GET',
                 dataType: 'json',
+                cache: false,
                 success: function(response) {
                     console.log('IPAPI Response:', response);
                     
@@ -217,6 +218,12 @@
 
     // Initialize on document ready
     $(document).ready(function() {
+        // Clear any cached data in localStorage
+        localStorage.removeItem('ffb_geo_data');
+        
+        // Add a timestamp to avoid browser caching
+        console.log('Initializing geo-blocker.js at ' + new Date().toISOString());
+        
         checkUserLocation();
         addZipValidation();
     });

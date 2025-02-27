@@ -766,15 +766,16 @@ class FormidableFormsBlocker {
                     <tr valign="top">
                         <th scope="row">Approved States</th>
                         <td>
-                            <?php
-                            $approved_states = get_option('ffb_approved_states', ['CA', 'NY', 'TX']);
-                            if (!is_array($approved_states)) {
-                                $approved_states = explode(',', $approved_states);
-                                $approved_states = array_map('trim', $approved_states);
-                            }
+                            <?php 
+                                $approved_states = get_option('ffb_approved_states', ['CA', 'NY', 'TX']);
+                                if (!is_array($approved_states)) {
+                                    $approved_states = explode(',', $approved_states);
+                                    $approved_states = array_map('trim', $approved_states);
+                                }
                             ?>
                             <input type="text" name="ffb_approved_states" value="<?php echo esc_attr(implode(',', $approved_states)); ?>" />
-                            <p class="description">Enter comma-separated two-letter state codes (e.g., CA,NY,TX)</p>
+                            <p class="description">Enter comma-separated state codes (e.g., NY,CA,TX) to allow form submissions from these states.</p>
+                            <p class="description"><strong>Note:</strong> After changing approved states, please clear the IP cache below to ensure changes take effect immediately.</p>
                         </td>
                     </tr>
                     <tr valign="top">
@@ -1329,6 +1330,12 @@ class FormidableFormsBlocker {
      */
     public function clear_ip_cache() {
         delete_option('ffb_ip_cache');
+        
+        // Also clear all transients that start with ffb_geo_
+        global $wpdb;
+        $wpdb->query("DELETE FROM $wpdb->options WHERE option_name LIKE '_transient_ffb_geo_%'");
+        $wpdb->query("DELETE FROM $wpdb->options WHERE option_name LIKE '_transient_timeout_ffb_geo_%'");
+        
         return true;
     }
     
