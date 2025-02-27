@@ -2,10 +2,11 @@
 /**
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
- * Description: Block form submissions based on IP, state, or ZIP code.
- * Version: 1.6.8
- * Author: AQ Marketing
+ * Description: Block form submissions from specific countries, states, and zip codes.
+ * Version: 1.6.9
+ * Author: AQMarketing
  * Author URI: https://aqmarketing.com
+ * Text Domain: aqm-formidable-spam-blocker
  */
 
 if (!defined('ABSPATH')) {
@@ -86,8 +87,8 @@ class FormidableFormsBlocker {
     }
 
     public function enqueue_scripts() {
-        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.6.8', true);
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.8');
+        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.6.9', true);
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.9');
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
             'api_url' => 'https://api.ipapi.com/check?access_key=' . $this->api_key . '&ip=',
             'approved_states' => $this->approved_states,
@@ -121,7 +122,7 @@ class FormidableFormsBlocker {
         }
         
         // Get geo data from IP
-        $geo_data = $this->get_geo_data($user_ip);
+        $geo_data = $this->get_geo_data();
         
         // Check for API errors
         if (!$geo_data) {
@@ -234,7 +235,7 @@ class FormidableFormsBlocker {
         $table_name = $wpdb->prefix . 'ffb_access_log';
         
         // Get geo data for the IP
-        $geo_data = $this->get_geo_data($ip);
+        $geo_data = $this->get_geo_data();
         
         $country = isset($geo_data['country_name']) ? $geo_data['country_name'] : '';
         $region = isset($geo_data['region']) ? $geo_data['region'] : '';
@@ -268,7 +269,7 @@ class FormidableFormsBlocker {
             return $content;
         }
         
-        $geo_data = $this->get_geo_data($user_ip);
+        $geo_data = $this->get_geo_data();
         
         // DEBUG: Log geo data for troubleshooting
         error_log('FFB Debug - IP: ' . $user_ip);
@@ -414,24 +415,68 @@ class FormidableFormsBlocker {
      * AJAX handler for testing API key and subscription status
      */
     public function ajax_test_api_key() {
-        // Verify nonce and permissions
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'ffb_test_api_key')) {
-            wp_send_json_error(['error' => 'Security check failed']);
-            return;
-        }
+        // Check nonce
+        check_ajax_referer('ffb_ajax_nonce', 'nonce');
         
         if (!current_user_can('manage_options')) {
-            wp_send_json_error(['error' => 'Permission denied']);
+            wp_send_json_error(['message' => 'Unauthorized']);
             return;
         }
         
         $api_key = isset($_POST['api_key']) ? sanitize_text_field($_POST['api_key']) : '';
         
-        // Always return success
-        wp_send_json_success([
-            'message' => 'API key validation has been disabled. Any key will work.',
-            'plan' => 'business_pro_or_higher'
-        ]);
+        if (empty($api_key)) {
+            wp_send_json_error(['message' => 'API key is required']);
+            return;
+        }
+        
+        // Test the API key with a known IP (Google's DNS)
+        $test_ip = '8.8.8.8';
+        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$api_key}&ip={$test_ip}");
+        
+        if (is_wp_error($geo_data)) {
+            $error_message = 'API Error: ' . $geo_data->get_error_message();
+            set_transient('ffb_api_key_error', $error_message, 60);
+            wp_send_json_error(['message' => $error_message]);
+            return;
+        }
+        
+        $http_code = wp_remote_retrieve_response_code($geo_data);
+        $body = wp_remote_retrieve_body($geo_data);
+        $geo_data = json_decode($body, true);
+        
+        // Check if JSON decode failed
+        if ($geo_data === null) {
+            $error_message = 'Invalid response from API. Please check your API key.';
+            set_transient('ffb_api_key_error', $error_message, 60);
+            wp_send_json_error(['message' => $error_message, 'raw_response' => $body]);
+            return;
+        }
+        
+        // Check for API error messages
+        if (isset($geo_data['success']) && $geo_data['success'] === false) {
+            $error_info = isset($geo_data['error']['info']) ? $geo_data['error']['info'] : 'Unknown API error';
+            $error_code = isset($geo_data['error']['code']) ? $geo_data['error']['code'] : 'Unknown';
+            $error_type = isset($geo_data['error']['type']) ? $geo_data['error']['type'] : 'Unknown';
+            
+            $error_message = "API Error: {$error_info} (Code: {$error_code}, Type: {$error_type})";
+            set_transient('ffb_api_key_error', $error_message, 60);
+            wp_send_json_error(['message' => $error_message, 'error_details' => $geo_data['error']]);
+            return;
+        }
+        
+        // Check if we have location data
+        if (!isset($geo_data['country_code']) || !isset($geo_data['region'])) {
+            $error_message = 'API key is valid but did not return location data. Please check your account limits.';
+            set_transient('ffb_api_key_error', $error_message, 60);
+            wp_send_json_error(['message' => $error_message, 'response' => $geo_data]);
+            return;
+        }
+        
+        // API key is valid
+        $success_message = 'API key is valid! Test IP: ' . $test_ip . ', Location: ' . $geo_data['country_name'] . ', ' . $geo_data['region'];
+        set_transient('ffb_api_key_success', $success_message, 60);
+        wp_send_json_success(['message' => $success_message]);
     }
 
     /**
@@ -532,19 +577,45 @@ class FormidableFormsBlocker {
         $user_ip = $_SERVER['REMOTE_ADDR'];
         $api_key = get_option('ffb_api_key', $this->api_key);
         
+        error_log('IPAPI Test - User IP: ' . $user_ip);
+        error_log('IPAPI Test - API Key: ' . (empty($api_key) ? 'Empty' : 'Present (not shown for security)'));
+        
+        // Log the API URL we're calling
+        $api_url = "https://api.ipapi.com/check?access_key={$api_key}&ip={$user_ip}";
+        error_log('IPAPI Test - API URL: ' . preg_replace('/access_key=([^&]+)/', 'access_key=HIDDEN', $api_url));
+        
         // Make a direct API call to see the raw response
-        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$api_key}&ip={$user_ip}");
+        $geo_data = wp_remote_get($api_url);
         
         if (is_wp_error($geo_data)) {
             error_log('IPAPI Error: ' . $geo_data->get_error_message());
             return false;
         }
         
+        // Log the HTTP response code
+        $http_code = wp_remote_retrieve_response_code($geo_data);
+        error_log('IPAPI Test - HTTP Response Code: ' . $http_code);
+        
         $body = wp_remote_retrieve_body($geo_data);
+        error_log('IPAPI Test - Raw Response: ' . $body);
+        
         $geo_data = json_decode($body, true);
+        
+        // Check if JSON decode failed
+        if ($geo_data === null) {
+            error_log('IPAPI Test - JSON Decode Failed. Raw response: ' . $body);
+            return false;
+        }
         
         // Log the complete API response
         error_log('IPAPI Complete Response for IP ' . $user_ip . ': ' . print_r($geo_data, true));
+        
+        // Check for API error messages
+        if (isset($geo_data['success']) && $geo_data['success'] === false) {
+            error_log('IPAPI Error - Code: ' . ($geo_data['error']['code'] ?? 'Unknown'));
+            error_log('IPAPI Error - Type: ' . ($geo_data['error']['type'] ?? 'Unknown'));
+            error_log('IPAPI Error - Info: ' . ($geo_data['error']['info'] ?? 'Unknown'));
+        }
         
         // Check specifically for region/state information
         if (isset($geo_data['region_code'])) {
@@ -1134,49 +1205,82 @@ class FormidableFormsBlocker {
     }
 
     /**
-     * Get geolocation data for an IP address, using cache when available
+     * Get geolocation data for the current user
+     * 
+     * @return array|false Geolocation data or false on failure
      */
-    private function get_geo_data($ip) {
-        // Check if we have cached data for this IP
-        $cached_data = get_option('ffb_ip_cache', []);
+    public function get_geo_data() {
+        // Check if we have cached data
+        $user_ip = $_SERVER['REMOTE_ADDR'];
+        $cache_key = 'ffb_geo_' . md5($user_ip);
+        $cached_data = get_transient($cache_key);
         
-        if (isset($cached_data[$ip])) {
-            // We have cached data, return it
-            return $cached_data[$ip];
+        if ($cached_data !== false) {
+            return $cached_data;
         }
         
-        // No cached data, fetch from API
-        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$this->api_key}&ip={$ip}");
+        $api_key = get_option('ffb_api_key', $this->api_key);
         
-        // Check for API errors
-        if (is_wp_error($geo_data)) {
-            error_log('IPAPI Error: ' . $geo_data->get_error_message());
+        if (empty($api_key)) {
+            error_log('FFB: No API key configured');
             return false;
         }
         
-        $body = wp_remote_retrieve_body($geo_data);
+        // Make API call
+        $api_url = "https://api.ipapi.com/check?access_key={$api_key}&ip={$user_ip}";
+        $response = wp_remote_get($api_url);
+        
+        if (is_wp_error($response)) {
+            error_log('FFB: API Error - ' . $response->get_error_message());
+            return false;
+        }
+        
+        $http_code = wp_remote_retrieve_response_code($response);
+        if ($http_code !== 200) {
+            error_log('FFB: API returned non-200 status code: ' . $http_code);
+        }
+        
+        $body = wp_remote_retrieve_body($response);
         $geo_data = json_decode($body, true);
         
-        // Log the geo data for debugging
-        error_log('IPAPI Response for IP ' . $ip . ': ' . print_r($geo_data, true));
-        
-        // Check if API returned an error
-        if (isset($geo_data['success']) && $geo_data['success'] === false) {
-            $error_message = isset($geo_data['error']['info']) ? $geo_data['error']['info'] : 'Unknown API error';
-            error_log('IPAPI Error: ' . $error_message);
+        // Check if JSON decode failed
+        if ($geo_data === null) {
+            error_log('FFB: Failed to decode API response - ' . $body);
             return false;
         }
         
-        // Ensure we have a standardized region code for state validation
-        if (isset($geo_data['region_code']) && !isset($geo_data['region'])) {
-            $geo_data['region'] = $geo_data['region_code'];
-        } else if (isset($geo_data['region']) && !isset($geo_data['region_code'])) {
-            $geo_data['region_code'] = $geo_data['region'];
+        // Check for API error messages
+        if (isset($geo_data['success']) && $geo_data['success'] === false) {
+            $error_info = isset($geo_data['error']['info']) ? $geo_data['error']['info'] : 'Unknown API error';
+            $error_code = isset($geo_data['error']['code']) ? $geo_data['error']['code'] : 'Unknown';
+            
+            error_log("FFB: API Error - {$error_info} (Code: {$error_code})");
+            
+            // If we have usage limits exceeded, return a special error
+            if (isset($geo_data['error']['code']) && $geo_data['error']['code'] == 104) {
+                // Usage limit reached - create a minimal geo_data with just the error
+                $fallback_geo_data = [
+                    'error' => true,
+                    'error_code' => 104,
+                    'error_message' => 'API usage limit reached'
+                ];
+                
+                // Cache the error for a shorter time (5 minutes)
+                set_transient($cache_key, $fallback_geo_data, 300);
+                return $fallback_geo_data;
+            }
+            
+            return false;
         }
         
-        // Cache the data
-        $cached_data[$ip] = $geo_data;
-        update_option('ffb_ip_cache', $cached_data);
+        // Ensure we have the minimum required data
+        if (!isset($geo_data['country_code'])) {
+            error_log('FFB: API response missing country_code - ' . print_r($geo_data, true));
+            return false;
+        }
+        
+        // Cache the data for 1 hour
+        set_transient($cache_key, $geo_data, 3600);
         
         return $geo_data;
     }

@@ -1,17 +1,20 @@
-# Changelog
+# AQM Formidable Forms Spam Blocker Changelog
 
-All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin will be documented in this file.
+## 1.6.9 - February 26, 2025
+- Enhanced API error handling and logging
+- Improved API key validation with detailed error messages
+- Updated geolocation data caching to use transients
+- Added comprehensive API response testing and diagnostics
+- Fixed issues with API usage limits detection
+- Added fallback behavior when API limits are reached
 
-## [1.6.8] - 2025-02-26
+## 1.6.8 - February 26, 2025
+- Fixed state validation to handle both `region` and `region_code` fields from the API
+- Added API response format testing tool in admin panel
+- Improved error handling and debugging for geolocation checks
+- Enhanced logging for troubleshooting geolocation issues
 
-### Fixed
-- Fixed state validation to check both region and region_code fields from the API
-- Added debugging tools to troubleshoot geolocation issues
-- Added API response format test in admin panel
-- Improved error handling and logging for geolocation
-- Enhanced state and ZIP code comparison logic
-
-## [1.6.7] - 2023-05-15
+## 1.6.7 - 2023-05-15
 
 ### Fixed
 - Fixed ZIP code validation to work the same way as state validation
@@ -19,7 +22,7 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Added server-side ZIP code blocking for content display
 - Improved consistency between state and ZIP code validation
 
-## [1.6.6] - 2023-05-14
+## 1.6.6 - 2023-05-14
 
 ### Added
 - Added IP cache management UI to settings page
@@ -30,7 +33,7 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Added cache statistics and clear cache functionality
 - Improved styling for IP management interface
 
-## [1.6.5] - 2023-02-26
+## 1.6.5 - 2023-02-26
 
 ### Fixed
 - Fixed state-based blocking functionality
@@ -42,27 +45,27 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Methods to get, search, and delete cached IP data
 - AJAX handlers for IP management
 
-## [1.6.4] - 2023-02-15
+## 1.6.4 - 2023-02-15
 
 ### Changed
 - Removed API key validation requirement
 - Modified methods to always return successful validation
 - Removed dependency on external API subscription status
 
-## [1.6.3] - 2023-02-10
+## 1.6.3 - 2023-02-10
 
 ### Added
 - Enhanced logging for blocked submissions
 - Improved admin notification system
 
-## [1.6.2] - 2023-02-05
+## 1.6.2 - 2023-02-05
 
 ### Fixed
 - Resolved issues with state validation
 - Updated API endpoint handling
 - Improved error reporting
 
-## [1.6.1] - 2023-02-01
+## 1.6.1 - 2023-02-01
 
 ### Added
 - Enhanced API key validation with subscription plan detection
@@ -79,7 +82,7 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Improved input sanitization
 - Added proper capability checks for admin actions
 
-## [1.6.0] - 2023-01-15
+## 1.6.0 - 2023-01-15
 
 ### Added
 - Comprehensive access logging system
@@ -88,7 +91,7 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Improved input sanitization
 - Added proper capability checks for admin actions
 
-## [1.5.0] - 2023-01-10
+## 1.5.0 - 2023-01-10
 
 ### Added
 - ZIP code blocking functionality
@@ -97,7 +100,7 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Server-side validation for ZIP codes
 - Detailed error messages for blocked ZIP codes
 
-## [1.4.0] - 2022-12-15
+## 1.4.0 - 2022-12-15
 
 ### Added
 - State blocking functionality
@@ -106,7 +109,7 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Server-side validation for states
 - Detailed error messages for blocked states
 
-## [1.3.0] - 2022-12-01
+## 1.3.0 - 2022-12-01
 
 ### Added
 - Country blocking functionality
@@ -115,7 +118,7 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Server-side validation for countries
 - Detailed error messages for blocked countries
 
-## [1.2.0] - 2022-11-15
+## 1.2.0 - 2022-11-15
 
 ### Added
 - IP blocking functionality
@@ -123,14 +126,14 @@ All notable changes to the "Formidable Forms State & ZIP Code Blocker" plugin wi
 - Server-side validation for IPs
 - Detailed error messages for blocked IPs
 
-## [1.1.0] - 2022-11-01
+## 1.1.0 - 2022-11-01
 
 ### Added
 - Rate limiting functionality
 - Admin settings for configuring rate limits
 - Detailed error messages for rate-limited submissions
 
-## [1.0.0] - 2022-10-15
+## 1.0.0 - 2022-10-15
 
 ### Added
 - Initial plugin release
