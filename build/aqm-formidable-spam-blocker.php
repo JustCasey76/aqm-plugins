@@ -159,19 +159,43 @@ class FormidableFormsBlocker {
         
         // Check state - only if we have approved states configured
         if (!empty($this->approved_states)) {
-            // Make sure approved_states is an array of trimmed values
-            $approved_states = array_map('trim', $this->approved_states);
+            // Make sure approved_states is an array of trimmed, uppercase values
+            $approved_states = array_map(function($state) {
+                return strtoupper(trim($state));
+            }, $this->approved_states);
             
-            if ($geo_data && (isset($geo_data['region']) || isset($geo_data['region_code']))) {
-                $region_code = trim($geo_data['region'] ?? $geo_data['region_code']);
+            if ($geo_data && (isset($geo_data['region_code']) || isset($geo_data['region_name']) || isset($geo_data['region']))) {
+                // Get the region code, prioritizing region_code over region
+                $region_code = '';
+                if (!empty($geo_data['region_code'])) {
+                    $region_code = strtoupper(trim($geo_data['region_code']));
+                } elseif (!empty($geo_data['region'])) {
+                    $region_code = strtoupper(trim($geo_data['region']));
+                } elseif (!empty($geo_data['region_name'])) {
+                    $region_code = strtoupper(trim($geo_data['region_name']));
+                }
                 
-                // Debug log
-                error_log('Checking state: ' . $region_code . ' against approved states: ' . implode(',', $approved_states));
-                
-                if (!in_array($region_code, $approved_states)) {
-                    $errors['general'] = 'Submissions are only allowed from specific states.';
-                    $this->log_access_attempt($user_ip, 'blocked', 'Disallowed state: ' . $region_code, $form_id);
-                    return $errors;
+                // Special handling for Massachusetts
+                if ($region_code === 'MASSACHUSETTS' || $region_code === 'MASS' || $region_code === 'MA') {
+                    // Check if MA is in the approved list
+                    if (in_array('MA', $approved_states)) {
+                        // Massachusetts is approved
+                        error_log('FFB: Massachusetts (MA) is in the approved list');
+                    } else {
+                        $errors['general'] = 'Forms are not available in your state.';
+                        $this->log_access_attempt($user_ip, 'blocked', 'Disallowed state: ' . $region_code . ' (Massachusetts)', $form_id);
+                        return $errors;
+                    }
+                } else {
+                    // Debug log
+                    error_log('FFB: Checking state: ' . $region_code . ' against approved states: ' . implode(',', $approved_states));
+                    
+                    // Check if the state code is in the approved list
+                    if (!in_array($region_code, $approved_states)) {
+                        $errors['general'] = 'Forms are not available in your state.';
+                        $this->log_access_attempt($user_ip, 'blocked', 'Disallowed state: ' . $region_code, $form_id);
+                        return $errors;
+                    }
                 }
             }
         }
@@ -611,80 +635,101 @@ class FormidableFormsBlocker {
      * Test function to check API response format for a specific IP
      */
     public function check_api_response_format() {
+        global $wpdb;
+        
+        // Get the user's IP
         $user_ip = $_SERVER['REMOTE_ADDR'];
-        $api_key = get_option('ffb_api_key', $this->api_key);
         
-        error_log('IPAPI Test - User IP: ' . $user_ip);
-        error_log('IPAPI Test - API Key: ' . (empty($api_key) ? 'Empty' : 'Present (not shown for security)'));
+        // Clear any existing cached data for this IP
+        $this->delete_ip_from_cache($user_ip);
         
-        // Log the API URL we're calling
-        $api_url = "https://api.ipapi.com/api/{$user_ip}?access_key={$api_key}";
-        error_log('IPAPI Test - API URL: ' . preg_replace('/access_key=([^&]+)/', 'access_key=HIDDEN', $api_url));
+        // Get fresh geo data
+        $geo_data = $this->get_geo_data($user_ip);
         
-        // Make a direct API call to see the raw response
-        $geo_data = wp_remote_get($api_url);
+        // Get the most recent log entries
+        $table_name = $wpdb->prefix . 'ffb_access_log';
+        $recent_logs = $wpdb->get_results("SELECT * FROM $table_name ORDER BY id DESC LIMIT 10");
         
-        if (is_wp_error($geo_data)) {
-            error_log('IPAPI Error: ' . $geo_data->get_error_message());
-            return false;
+        echo '<div style="background-color: #f8f9fa; padding: 20px; border: 1px solid #ddd; margin: 20px 0;">';
+        echo '<h2>API Response Format Test</h2>';
+        
+        if ($geo_data) {
+            echo '<h3>Your Current Location:</h3>';
+            echo '<ul>';
+            echo '<li><strong>IP:</strong> ' . esc_html($user_ip) . '</li>';
+            echo '<li><strong>Country:</strong> ' . esc_html($geo_data['country_name'] ?? 'N/A') . ' (' . esc_html($geo_data['country_code'] ?? 'N/A') . ')</li>';
+            echo '<li><strong>Region Name:</strong> ' . esc_html($geo_data['region_name'] ?? 'N/A') . '</li>';
+            echo '<li><strong>Region Code:</strong> ' . esc_html($geo_data['region_code'] ?? 'N/A') . '</li>';
+            echo '<li><strong>City:</strong> ' . esc_html($geo_data['city'] ?? 'N/A') . '</li>';
+            echo '<li><strong>ZIP:</strong> ' . esc_html($geo_data['zip'] ?? 'N/A') . '</li>';
+            echo '</ul>';
+            
+            // Check if this state is in the approved list
+            $approved_states = get_option('ffb_approved_states', []);
+            if (!is_array($approved_states)) {
+                $approved_states = explode(',', $approved_states);
+                $approved_states = array_map('trim', $approved_states);
+            }
+            
+            // Convert to uppercase for comparison
+            $approved_states = array_map('strtoupper', $approved_states);
+            $region_code = strtoupper($geo_data['region_code'] ?? '');
+            
+            echo '<h3>State Validation Check:</h3>';
+            echo '<ul>';
+            echo '<li><strong>Your State Code:</strong> ' . esc_html($region_code) . '</li>';
+            echo '<li><strong>Approved States:</strong> ' . esc_html(implode(', ', $approved_states)) . '</li>';
+            
+            // Special check for Massachusetts
+            if ($region_code === 'MA' || $region_code === 'MASSACHUSETTS') {
+                echo '<li><strong>Special Massachusetts Check:</strong> ';
+                if (in_array('MA', $approved_states)) {
+                    echo 'MA is in the approved list ';
+                } else {
+                    echo 'MA is NOT in the approved list ';
+                }
+                echo '</li>';
+            }
+            
+            echo '<li><strong>Is Approved:</strong> ' . (in_array($region_code, $approved_states) ? 'YES ' : 'NO ') . '</li>';
+            echo '</ul>';
+            
+            // Show the raw API response
+            echo '<h3>Raw API Response:</h3>';
+            echo '<pre style="background-color: #f0f0f0; padding: 10px; overflow: auto; max-height: 300px;">';
+            print_r($geo_data);
+            echo '</pre>';
+        } else {
+            echo '<p>Error: Could not retrieve geolocation data.</p>';
         }
         
-        // Log the HTTP response code
-        $http_code = wp_remote_retrieve_response_code($geo_data);
-        error_log('IPAPI Test - HTTP Response Code: ' . $http_code);
-        
-        $body = wp_remote_retrieve_body($geo_data);
-        error_log('IPAPI Test - Raw Response: ' . $body);
-        
-        $geo_data = json_decode($body, true);
-        
-        // Check if JSON decode failed
-        if ($geo_data === null) {
-            error_log('IPAPI Test - JSON Decode Failed. Raw response: ' . $body);
-            return false;
+        // Display recent log entries
+        echo '<h3>Recent Access Log Entries:</h3>';
+        if (empty($recent_logs)) {
+            echo '<p>No recent log entries found.</p>';
+        } else {
+            echo '<table class="wp-list-table widefat fixed striped" style="width: 100%;">';
+            echo '<thead><tr>';
+            echo '<th>Time</th><th>IP</th><th>Country</th><th>Region</th><th>Status</th><th>Reason</th>';
+            echo '</tr></thead><tbody>';
+            
+            foreach ($recent_logs as $log) {
+                echo '<tr>';
+                echo '<td>' . esc_html($log->time) . '</td>';
+                echo '<td>' . esc_html($log->ip_address) . '</td>';
+                echo '<td>' . esc_html($log->country) . '</td>';
+                echo '<td>' . esc_html($log->region) . '</td>';
+                echo '<td>' . esc_html($log->status) . '</td>';
+                echo '<td>' . esc_html($log->reason) . '</td>';
+                echo '</tr>';
+            }
+            
+            echo '</tbody></table>';
         }
         
-        // Log the complete API response
-        error_log('IPAPI Complete Response for IP ' . $user_ip . ': ' . print_r($geo_data, true));
+        echo '</div>';
         
-        // Check for API error messages
-        if (isset($geo_data['success']) && $geo_data['success'] === false) {
-            error_log('IPAPI Error - Code: ' . ($geo_data['error']['code'] ?? 'Unknown'));
-            error_log('IPAPI Error - Type: ' . ($geo_data['error']['type'] ?? 'Unknown'));
-            error_log('IPAPI Error - Info: ' . ($geo_data['error']['info'] ?? 'Unknown'));
-        }
-        
-        // Check specifically for region/state information
-        if (isset($geo_data['region_code'])) {
-            error_log('IPAPI Region Code: ' . $geo_data['region_code']);
-        }
-        
-        if (isset($geo_data['region_name'])) {
-            error_log('IPAPI Region Name: ' . $geo_data['region_name']);
-        }
-        
-        if (isset($geo_data['region'])) {
-            error_log('IPAPI Region: ' . $geo_data['region']);
-        }
-        
-        // Check for ZIP/postal code
-        if (isset($geo_data['zip'])) {
-            error_log('IPAPI ZIP Code: ' . $geo_data['zip']);
-        }
-        
-        if (isset($geo_data['postal'])) {
-            error_log('IPAPI Postal Code: ' . $geo_data['postal']);
-        }
-        
-        // Create a standardized response for display
-        $standardized_data = [
-            'country' => isset($geo_data['country_name']) ? $geo_data['country_name'] . ' (' . $geo_data['country_code'] . ')' : 'Not available (N/A)',
-            'region' => isset($geo_data['region_name']) ? $geo_data['region_name'] : (isset($geo_data['region']) ? $geo_data['region'] : 'Not available'),
-            'region_code' => isset($geo_data['region_code']) ? $geo_data['region_code'] : 'Not available',
-            'zip' => isset($geo_data['zip']) ? $geo_data['zip'] : (isset($geo_data['postal']) ? $geo_data['postal'] : 'Not available')
-        ];
-        
-        return $standardized_data;
+        return true;
     }
 
     public function settings_page() {
@@ -742,20 +787,7 @@ class FormidableFormsBlocker {
                     <?php
                     // Handle API test button click
                     if (isset($_POST['ffb_test_api_response']) && check_admin_referer('ffb_api_test_nonce')) {
-                        $api_response = $this->check_api_response_format();
-                        if ($api_response) {
-                            echo '<div class="notice notice-info"><p>API test completed. Check your server error log for detailed information.</p>';
-                            echo '<p>Your location according to the API:</p>';
-                            echo '<ul>';
-                            echo '<li><strong>Country:</strong> ' . (isset($api_response['country']) ? esc_html($api_response['country']) : 'Not available') . '</li>';
-                            echo '<li><strong>Region:</strong> ' . (isset($api_response['region']) ? esc_html($api_response['region']) : 'Not available') . '</li>';
-                            echo '<li><strong>Region Code:</strong> ' . (isset($api_response['region_code']) ? esc_html($api_response['region_code']) : 'Not available') . '</li>';
-                            echo '<li><strong>ZIP/Postal Code:</strong> ' . (isset($api_response['zip']) ? esc_html($api_response['zip']) : 'Not available') . '</li>';
-                            echo '</ul>';
-                            echo '</div>';
-                        } else {
-                            echo '<div class="notice notice-error"><p>API test failed. Check your server error log for more information.</p></div>';
-                        }
+                        $this->check_api_response_format();
                     }
                     ?>
                 </div>
