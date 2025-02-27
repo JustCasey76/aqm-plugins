@@ -370,22 +370,43 @@ class FormidableFormsBlocker {
 
     public function register_settings() {
         register_setting('ffb_settings_group', 'ffb_approved_states', [
-            'sanitize_callback' => [$this, 'sanitize_comma_list']
+            'sanitize_callback' => [$this, 'sanitize_comma_list'],
+            'update_callback' => [$this, 'clear_caches_after_update']
         ]);
         register_setting('ffb_settings_group', 'ffb_approved_zip_codes', [
-            'sanitize_callback' => [$this, 'sanitize_comma_list']
+            'sanitize_callback' => [$this, 'sanitize_comma_list'],
+            'update_callback' => [$this, 'clear_caches_after_update']
         ]);
-        register_setting('ffb_settings_group', 'ffb_block_non_us');
+        register_setting('ffb_settings_group', 'ffb_block_non_us', [
+            'update_callback' => [$this, 'clear_caches_after_update']
+        ]);
         register_setting('ffb_settings_group', 'ffb_rate_limit_requests');
         register_setting('ffb_settings_group', 'ffb_rate_limit_time');
         register_setting('ffb_settings_group', 'ffb_api_key', [
-            'sanitize_callback' => [$this, 'validate_api_key']
+            'sanitize_callback' => [$this, 'validate_api_key'],
+            'update_callback' => [$this, 'clear_caches_after_update']
         ]);
         register_setting('ffb_settings_group', 'ffb_blocked_ips', [
             'sanitize_callback' => [$this, 'sanitize_comma_list']
         ]);
         register_setting('ffb_settings_group', 'ffb_log_enabled');
         register_setting('ffb_settings_group', 'ffb_hide_forms');
+    }
+    
+    /**
+     * Clear all caches after settings are updated
+     */
+    public function clear_caches_after_update($option, $old_value, $value) {
+        // Clear our own cache
+        $this->clear_ip_cache();
+        
+        // Clear WP Rocket cache if active
+        if (function_exists('rocket_clean_domain')) {
+            rocket_clean_domain();
+            error_log('FFB: WP Rocket cache cleared after settings update');
+        }
+        
+        return $value;
     }
     
     /**
@@ -667,74 +688,40 @@ class FormidableFormsBlocker {
     }
 
     public function settings_page() {
-        // Handle the case where approved_zip_codes is stored in the object but not in options
-        $zip_codes = get_option('ffb_approved_zip_codes', $this->approved_zip_codes);
-        if (!is_array($zip_codes)) {
-            $zip_codes = explode(',', $zip_codes);
-            $zip_codes = array_map('trim', $zip_codes);
+        if (isset($_POST['clear_cache'])) {
+            $this->clear_ip_cache();
+            echo '<div class="notice notice-success is-dismissible"><p>Plugin cache cleared successfully!</p></div>';
         }
         
-        // Get admin's current IP
-        $admin_ip = $_SERVER['REMOTE_ADDR'];
-        $is_admin_ip_blocked = in_array($admin_ip, $this->blocked_ips);
-        
-        // Handle form submission for blocking/unblocking admin IP
-        if (isset($_POST['ffb_toggle_admin_ip']) && check_admin_referer('ffb_toggle_admin_ip_nonce')) {
-            $block_admin_ip = isset($_POST['ffb_block_admin_ip']) ? true : false;
-            
-            if ($block_admin_ip && !$is_admin_ip_blocked) {
-                // Add admin IP to blocked list
-                $this->blocked_ips[] = $admin_ip;
-                update_option('ffb_blocked_ips', implode(',', $this->blocked_ips));
-                $is_admin_ip_blocked = true;
-                // Log the admin IP block for testing
-                $this->log_access_attempt($admin_ip, 'admin_action', 'Admin IP added to block list for testing', '');
-                echo '<div class="notice notice-success"><p>Your IP address has been added to the blocked list for testing.</p></div>';
-            } elseif (!$block_admin_ip && $is_admin_ip_blocked) {
-                // Remove admin IP from blocked list
-                $this->blocked_ips = array_diff($this->blocked_ips, [$admin_ip]);
-                update_option('ffb_blocked_ips', implode(',', $this->blocked_ips));
-                $is_admin_ip_blocked = false;
-                // Log the admin IP unblock
-                $this->log_access_attempt($admin_ip, 'admin_action', 'Admin IP removed from block list', '');
-                echo '<div class="notice notice-success"><p>Your IP address has been removed from the blocked list.</p></div>';
-            }
+        if (isset($_POST['clear_wp_rocket']) && function_exists('rocket_clean_domain')) {
+            rocket_clean_domain();
+            echo '<div class="notice notice-success is-dismissible"><p>WP Rocket cache cleared successfully!</p></div>';
         }
         ?>
-        <style>
-            .description.error {
-                color: #dc3232;
-                font-weight: bold;
-                margin-top: 5px;
-            }
-            .description.success {
-                color: #46b450;
-                font-weight: bold;
-                margin-top: 5px;
-            }
-            .api-key-container {
-                display: flex;
-                align-items: center;
-            }
-        </style>
-        <div class="wrap ffb-settings-page">
+        <div class="wrap">
             <h1>AQM Form Security Settings</h1>
-            <p>Configure which states and ZIP codes are allowed to submit Formidable Forms on your site.</p>
+            
+            <?php if (function_exists('rocket_clean_domain')): ?>
+            <div class="notice notice-warning">
+                <p><strong>WP Rocket Detected:</strong> If you're experiencing issues with state validation, please clear the WP Rocket cache after saving settings or use the "Clear Cache" button below.</p>
+                <p>You can also clear the WP Rocket cache from the WP Rocket settings page.</p>
+            </div>
+            <?php endif; ?>
             
             <!-- Admin IP Testing Section -->
             <div class="postbox">
                 <div class="inside">
                     <h2>Test Blocking with Your IP</h2>
-                    <p>Your current IP address is: <strong><?php echo esc_html($admin_ip); ?></strong></p>
+                    <p>Your current IP address is: <strong><?php echo esc_html($_SERVER['REMOTE_ADDR']); ?></strong></p>
                     <form method="post" action="">
                         <?php wp_nonce_field('ffb_toggle_admin_ip_nonce'); ?>
                         <label>
-                            <input type="checkbox" name="ffb_block_admin_ip" <?php checked($is_admin_ip_blocked); ?> />
+                            <input type="checkbox" name="ffb_block_admin_ip" <?php checked(in_array($_SERVER['REMOTE_ADDR'], $this->blocked_ips)); ?> />
                             Block my IP address for testing purposes
                         </label>
                         <p class="description">
                             This allows you to test how the form blocking appears to blocked users. 
-                            <?php if ($is_admin_ip_blocked): ?>
+                            <?php if (in_array($_SERVER['REMOTE_ADDR'], $this->blocked_ips)): ?>
                                 <strong>Warning: Your IP is currently blocked. You will not be able to submit any Formidable Forms.</strong>
                             <?php endif; ?>
                         </p>
@@ -785,18 +772,23 @@ class FormidableFormsBlocker {
                                 $approved_states = get_option('ffb_approved_states', ['CA', 'NY', 'TX']);
                                 if (!is_array($approved_states)) {
                                     $approved_states = explode(',', $approved_states);
-                                    $approved_states = array_map('trim', $approved_states);
                                 }
+                                $approved_states = array_map(function($state) {
+                                    return trim(strtoupper($state));
+                                }, $approved_states);
                             ?>
                             <input type="text" name="ffb_approved_states" value="<?php echo esc_attr(implode(',', $approved_states)); ?>" />
                             <p class="description">Enter comma-separated state codes (e.g., NY,CA,TX) to allow form submissions from these states.</p>
                             <p class="description"><strong>Note:</strong> After changing approved states, please clear the IP cache below to ensure changes take effect immediately.</p>
+                            <?php if (function_exists('rocket_clean_domain')): ?>
+                            <p class="description" style="color: #d63638;"><strong>Important:</strong> You are using WP Rocket. After saving, you should also clear the WP Rocket cache.</p>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Approved ZIP Codes</th>
                         <td>
-                            <input type="text" name="ffb_approved_zip_codes" value="<?php echo esc_attr(implode(',', $zip_codes)); ?>" />
+                            <input type="text" name="ffb_approved_zip_codes" value="<?php echo esc_attr(implode(',', $this->approved_zip_codes)); ?>" />
                             <p class="description">Enter comma-separated ZIP codes that are allowed to submit forms</p>
                         </td>
                     </tr>
@@ -928,159 +920,18 @@ class FormidableFormsBlocker {
                 <p>Manage the IP geolocation cache to reduce API calls.</p>
                 <table class="form-table">
                     <tr valign="top">
-                        <th scope="row">Cache Statistics</th>
+                        <th scope="row">Clear Cache</th>
                         <td>
-                            <?php
-                            $cached_data = get_option('ffb_ip_cache', []);
-                            $cache_count = count($cached_data);
-                            ?>
-                            <div class="ffb-cache-stats">
-                                <span class="ffb-cache-count"><?php echo $cache_count; ?></span>
-                                <span class="ffb-cache-label">IP addresses currently cached</span>
-                                <p>Caching IP geolocation data reduces API calls and improves form submission speed.</p>
-                                <button type="button" id="ffb_clear_cache" class="button button-secondary">Clear All Cached IPs</button>
-                            </div>
-                            <script>
-                            jQuery(document).ready(function($) {
-                                $('#ffb_clear_cache').click(function() {
-                                    if (confirm('Are you sure you want to clear all cached IP data? This will force the plugin to make new API calls for each IP.')) {
-                                        $.ajax({
-                                            type: 'POST',
-                                            url: '<?php echo admin_url('admin-ajax.php'); ?>',
-                                            data: {
-                                                action: 'ffb_clear_cache',
-                                                nonce: '<?php echo wp_create_nonce('ffb_ajax_nonce'); ?>'
-                                            },
-                                            success: function(response) {
-                                                if (response.success) {
-                                                    alert('IP cache cleared');
-                                                    location.reload();
-                                                } else {
-                                                    alert('Error: ' + response.data.message);
-                                                }
-                                            }
-                                        });
-                                    }
-                                });
-                            });
-                            </script>
-                        </td>
-                    </tr>
-                </table>
-                
-                <h2>IP Search</h2>
-                <p>Search for an IP address to view its geolocation data.</p>
-                <table class="form-table">
-                    <tr valign="top">
-                        <th scope="row">IP Address</th>
-                        <td>
-                            <input type="text" id="ffb_ip_search" name="ffb_ip_search" value="" style="width: 300px;" />
-                            <button type="button" id="ffb_search_ip" class="button button-secondary" style="margin-left: 10px;">Search</button>
-                            <div id="ffb_ip_search_results"></div>
-                            <script>
-                            jQuery(document).ready(function($) {
-                                $('#ffb_search_ip').click(function() {
-                                    var ip = $('#ffb_ip_search').val();
-                                    var resultContainer = $('#ffb_ip_search_results');
-                                    
-                                    // Show loading indicator
-                                    resultContainer.html('<p>Loading...</p>');
-                                    
-                                    $.ajax({
-                                        type: 'POST',
-                                        url: '<?php echo admin_url('admin-ajax.php'); ?>',
-                                        data: {
-                                            action: 'ffb_search_ip',
-                                            ip: ip,
-                                            nonce: '<?php echo wp_create_nonce('ffb_ajax_nonce'); ?>'
-                                        },
-                                        success: function(response) {
-                                            if (response.success) {
-                                                var data = response.data;
-                                                var html = '<div style="margin-top: 15px; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 3px;">';
-                                                html += '<h3>IP Information: ' + ip + '</h3>';
-                                                html += '<table class="widefat" style="margin-bottom: 15px;">';
-                                                html += '<tr><td><strong>Country:</strong></td><td>' + (data.data.country_name || 'N/A') + ' (' + (data.data.country_code || 'N/A') + ')</td></tr>';
-                                                html += '<tr><td><strong>Region:</strong></td><td>' + (data.data.region || 'N/A') + '</td></tr>';
-                                                html += '<tr><td><strong>City:</strong></td><td>' + (data.data.city || 'N/A') + '</td></tr>';
-                                                html += '<tr><td><strong>ZIP:</strong></td><td>' + (data.data.zip || 'N/A') + '</td></tr>';
-                                                html += '<tr><td><strong>Latitude:</strong></td><td>' + (data.data.latitude || 'N/A') + '</td></tr>';
-                                                html += '<tr><td><strong>Longitude:</strong></td><td>' + (data.data.longitude || 'N/A') + '</td></tr>';
-                                                html += '</table>';
-                                                
-                                                // Add buttons for actions
-                                                html += '<button type="button" class="button button-secondary ffb-delete-ip" data-ip="' + ip + '">Remove from Cache</button>';
-                                                html += '<button type="button" class="button button-primary ffb-allow-ip" data-ip="' + ip + '" style="margin-left: 10px;">Allow this IP</button>';
-                                                html += '<button type="button" class="button button-secondary ffb-block-ip" data-ip="' + ip + '" style="margin-left: 10px; background: #d63638; color: white; border-color: #d63638;">Block this IP</button>';
-                                                html += '</div>';
-                                                
-                                                resultContainer.html(html);
-                                                
-                                                // Add event handlers for the buttons
-                                                $('.ffb-delete-ip').click(function() {
-                                                    var ip = $(this).data('ip');
-                                                    if (confirm('Are you sure you want to remove this IP from the cache?')) {
-                                                        $.ajax({
-                                                            type: 'POST',
-                                                            url: '<?php echo admin_url('admin-ajax.php'); ?>',
-                                                            data: {
-                                                                action: 'ffb_delete_ip',
-                                                                ip: ip,
-                                                                nonce: '<?php echo wp_create_nonce('ffb_ajax_nonce'); ?>'
-                                                            },
-                                                            success: function(response) {
-                                                                if (response.success) {
-                                                                    alert('IP removed from cache');
-                                                                    $('#ffb_ip_search_results').html('');
-                                                                } else {
-                                                                    alert('Error: ' + response.data.message);
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                });
-                                                
-                                                $('.ffb-block-ip').click(function() {
-                                                    var ip = $(this).data('ip');
-                                                    var blockedIps = $('#ffb_blocked_ips').val();
-                                                    var blockedIpsArray = blockedIps ? blockedIps.split(',').map(function(item) { return item.trim(); }) : [];
-                                                    
-                                                    // Add the IP to blocked IPs if it's not already there
-                                                    if (blockedIpsArray.indexOf(ip) === -1) {
-                                                        blockedIpsArray.push(ip);
-                                                        $('#ffb_blocked_ips').val(blockedIpsArray.join(', '));
-                                                        alert('IP added to blocked list. Remember to save your settings!');
-                                                    } else {
-                                                        alert('This IP is already in the blocked list.');
-                                                    }
-                                                });
-                                                
-                                                $('.ffb-allow-ip').click(function() {
-                                                    var ip = $(this).data('ip');
-                                                    var blockedIps = $('#ffb_blocked_ips').val();
-                                                    var blockedIpsArray = blockedIps.split(',').map(function(item) { return item.trim(); });
-                                                    
-                                                    // Remove the IP from blocked IPs if it's there
-                                                    var index = blockedIpsArray.indexOf(ip);
-                                                    if (index !== -1) {
-                                                        blockedIpsArray.splice(index, 1);
-                                                        $('#ffb_blocked_ips').val(blockedIpsArray.join(','));
-                                                        alert('IP removed from blocked list. Remember to save your settings!');
-                                                    } else {
-                                                        alert('This IP is not in the blocked list.');
-                                                    }
-                                                });
-                                            } else {
-                                                resultContainer.html('<p>Error: ' + response.data.message + '</p>');
-                                            }
-                                        },
-                                        error: function(xhr, status, error) {
-                                            resultContainer.html('<p>Error: ' + error + '</p>');
-                                        }
-                                    });
-                                });
-                            });
-                            </script>
+                            <form method="post" action="">
+                                <input type="submit" name="clear_cache" class="button button-secondary" value="Clear Plugin Cache" />
+                                <?php if (function_exists('rocket_clean_domain')): ?>
+                                <input type="submit" name="clear_wp_rocket" class="button button-secondary" value="Clear WP Rocket Cache" />
+                                <?php endif; ?>
+                                <p class="description">Clear the IP cache to ensure changes take effect immediately. This is especially important after changing approved states or ZIP codes.</p>
+                                <?php if (function_exists('rocket_clean_domain')): ?>
+                                <p class="description">If you're experiencing issues with state validation, try clearing both caches.</p>
+                                <?php endif; ?>
+                            </form>
                         </td>
                     </tr>
                 </table>
@@ -1350,6 +1201,12 @@ class FormidableFormsBlocker {
         global $wpdb;
         $wpdb->query("DELETE FROM $wpdb->options WHERE option_name LIKE '_transient_ffb_geo_%'");
         $wpdb->query("DELETE FROM $wpdb->options WHERE option_name LIKE '_transient_timeout_ffb_geo_%'");
+        
+        // Clear WP Rocket cache if active
+        if (function_exists('rocket_clean_domain')) {
+            rocket_clean_domain();
+            error_log('FFB: WP Rocket cache cleared');
+        }
         
         return true;
     }
