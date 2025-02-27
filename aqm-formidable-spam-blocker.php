@@ -3,7 +3,7 @@
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
  * Description: Block form submissions from specific countries, states, and zip codes.
- * Version: 1.9.0
+ * $11.9.1
  * Author: AQMarketing
  * Author URI: https://aqmarketing.com
  * Text Domain: aqm-formidable-spam-blocker
