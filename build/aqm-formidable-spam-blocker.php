@@ -3,7 +3,7 @@
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
  * Description: Block form submissions from specific countries, states, and zip codes.
- * Version: 1.7.0
+ * Version: 1.9.0
  * Author: AQMarketing
  * Author URI: https://aqmarketing.com
  * Text Domain: aqm-formidable-spam-blocker
@@ -86,12 +86,12 @@ class FormidableFormsBlocker {
         add_action('wp_ajax_ffb_clear_cache', [$this, 'ajax_clear_cache']);
     }
 
-    public function enqueue_scripts() {
-        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.7.0', true);
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.7.0');
+    // Helper method to get approved states
+    public function get_approved_states() {
+        // Get approved states from options
+        $approved_states = get_option('ffb_approved_states', $this->approved_states);
         
         // Make sure approved states are properly formatted
-        $approved_states = $this->approved_states;
         if (!is_array($approved_states)) {
             $approved_states = explode(',', $approved_states);
         }
@@ -104,13 +104,54 @@ class FormidableFormsBlocker {
         // Debug log
         error_log('FFB: Passing approved states to JS: ' . implode(',', $approved_states));
         
-        wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
+        return $approved_states;
+    }
+    
+    // Helper method to get approved zip codes
+    public function get_approved_zip_codes() {
+        // Get approved zip codes from options
+        $approved_zip_codes = get_option('ffb_approved_zip_codes', $this->approved_zip_codes);
+        
+        // Make sure approved zip codes are properly formatted
+        if (!is_array($approved_zip_codes)) {
+            $approved_zip_codes = explode(',', $approved_zip_codes);
+        }
+        
+        // Clean up each zip code
+        $approved_zip_codes = array_map(function($zip) {
+            return trim($zip);
+        }, $approved_zip_codes);
+        
+        return $approved_zip_codes;
+    }
+
+    public function enqueue_scripts() {
+        // Get the approved states and zip codes
+        $approved_states = $this->get_approved_states();
+        $approved_zip_codes = $this->get_approved_zip_codes();
+        $block_non_us = get_option('ffb_block_non_us', '1') === '1';
+        $zip_validation_enabled = get_option('ffb_zip_validation_enabled', '0') === '1';
+        
+        // Always enqueue the scripts and styles to ensure they're available when needed
+        wp_enqueue_script('jquery');
+        
+        // Enqueue the geo-blocker script
+        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', array('jquery'), '1.9.0', true);
+        
+        // Enqueue the styles
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', array(), '1.9.0');
+        
+        // Localize the script with necessary data
+        wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
             'api_url' => 'https://api.ipapi.com/api/',
             'api_key' => get_option('ffb_api_key', $this->api_key),
             'approved_states' => $approved_states,
-            'approved_zip_codes' => $this->approved_zip_codes,
-            'block_non_us' => get_option('ffb_block_non_us', '1') === '1'
-        ]);
+            'approved_zip_codes' => $approved_zip_codes,
+            'block_non_us' => get_option('ffb_block_non_us', '1') === '1',
+            'zip_validation_enabled' => $zip_validation_enabled,
+            'is_admin' => current_user_can('manage_options')
+        ));
     }
 
     public function start_session() {
@@ -165,8 +206,9 @@ class FormidableFormsBlocker {
             }, $this->approved_states);
             
             if ($geo_data && (isset($geo_data['region_code']) || isset($geo_data['region_name']) || isset($geo_data['region']))) {
-                // Get the region code, prioritizing region_code over region
+                // Get the region code from the appropriate field
                 $region_code = '';
+                
                 if (!empty($geo_data['region_code'])) {
                     $region_code = strtoupper(trim($geo_data['region_code']));
                 } elseif (!empty($geo_data['region'])) {
@@ -178,9 +220,13 @@ class FormidableFormsBlocker {
                 // Special handling for Massachusetts
                 if ($region_code === 'MASSACHUSETTS' || $region_code === 'MASS' || $region_code === 'MA') {
                     // Check if MA is in the approved list
-                    if (in_array('MA', $approved_states)) {
+                    if (in_array('MA', $approved_states) || 
+                        in_array('MASSACHUSETTS', $approved_states) || 
+                        in_array('MASS', $approved_states)) {
                         // Massachusetts is approved
-                        error_log('FFB: Massachusetts (MA) is in the approved list');
+                        error_log('FFB: Massachusetts (MA) is in the approved list - allowing access');
+                        // State is approved, so we'll continue processing the form
+                        $this->log_access_attempt($user_ip, 'allowed', 'Approved state: ' . $region_code . ' (Massachusetts)', $form_id);
                     } else {
                         $errors['general'] = 'Forms are not available in your state.';
                         $this->log_access_attempt($user_ip, 'blocked', 'Disallowed state: ' . $region_code . ' (Massachusetts)', $form_id);
@@ -190,8 +236,12 @@ class FormidableFormsBlocker {
                     // Debug log
                     error_log('FFB: Checking state: ' . $region_code . ' against approved states: ' . implode(',', $approved_states));
                     
-                    // Check if the state code is in the approved list
-                    if (!in_array($region_code, $approved_states)) {
+                    // Check if the state is in the approved list
+                    if (in_array($region_code, $approved_states)) {
+                        // State is approved, so we'll continue processing the form
+                        error_log('FFB: State ' . $region_code . ' is in the approved list - allowing access');
+                        $this->log_access_attempt($user_ip, 'allowed', 'Approved state: ' . $region_code, $form_id);
+                    } else {
                         $errors['general'] = 'Forms are not available in your state.';
                         $this->log_access_attempt($user_ip, 'blocked', 'Disallowed state: ' . $region_code, $form_id);
                         return $errors;
@@ -668,8 +718,10 @@ class FormidableFormsBlocker {
             $approved_states = get_option('ffb_approved_states', []);
             if (!is_array($approved_states)) {
                 $approved_states = explode(',', $approved_states);
-                $approved_states = array_map('trim', $approved_states);
             }
+            $approved_states = array_map(function($state) {
+                return trim(strtoupper($state));
+            }, $approved_states);
             
             // Convert to uppercase for comparison
             $approved_states = array_map('strtoupper', $approved_states);
