@@ -1,5 +1,12 @@
 # AQM Formidable Forms Spam Blocker Changelog
 
+## 1.9.2 - February 27, 2025
+- Fixed form visibility issue where forms would remain hidden even when in approved locations
+- Improved form content preservation when toggling visibility
+- Enhanced dynamic form detection for forms added after page load
+- Added automatic form content restoration when access is allowed
+- Improved debugging and logging for form visibility status
+
 ## 1.7.0 - February 26, 2025
 - Fixed API endpoint URL format to match ipapi.com documentation
 - Updated client-side geolocation to use correct API endpoint format

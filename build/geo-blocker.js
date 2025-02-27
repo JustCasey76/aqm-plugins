@@ -1,7 +1,7 @@
 /**
  * Formidable Forms Geo-Blocker JavaScript
  * Handles client-side geo-blocking for Formidable Forms
- * Version: 1.9.1
+ * Version: 1.9.2
  */
 
 (function($) {
@@ -267,8 +267,8 @@
                 return;
             } else {
                 console.log('MA is approved, showing forms and exiting function');
-                // Explicitly ensure forms are visible
-                $('.frm_forms').show();
+                // Explicitly ensure forms are visible and restore content
+                showFormidableForms();
                 return; // Allow access
             }
         }
@@ -289,14 +289,34 @@
         
         // If we get here, access is allowed
         console.log('All checks passed, allowing access');
-        // Explicitly ensure forms are visible
-        $('.frm_forms').show();
+        // Explicitly ensure forms are visible and restore content
+        showFormidableForms();
+    }
+
+    // Show all Formidable Forms and restore original content
+    function showFormidableForms() {
+        console.log('Showing forms and restoring original content');
+        $('.frm_forms').each(function() {
+            // Restore original content if it was stored
+            var originalContent = $(this).data('original-content');
+            if (originalContent) {
+                $(this).html(originalContent);
+            }
+            // Make sure the form is visible
+            $(this).show();
+        });
     }
 
     // Hide all Formidable Forms and display a message
     function hideFormidableForms(message) {
         console.log('Hiding forms with message:', message);
         $('.frm_forms').each(function() {
+            // Store original form content if not already stored
+            if (!$(this).data('original-content')) {
+                $(this).data('original-content', $(this).html());
+            }
+            
+            // Hide the form and show the message
             $(this).html('<p class="ffb-blocked-message">' + message + '</p>');
         });
     }
@@ -331,6 +351,9 @@
             });
         }
         
+        // Make sure forms are visible by default
+        $('.frm_forms').show();
+        
         // Improved form detection - check for various Formidable Forms elements
         if ($('.frm_forms').length > 0 || 
             $('.frm_form_fields').length > 0 || 
@@ -338,8 +361,6 @@
             $('[class*="frm"]').length > 0) {
             
             console.log('Formidable Forms detected on page - checking location');
-            // Make sure forms are visible by default
-            $('.frm_forms').show();
             
             // Check user location
             checkUserLocation();
@@ -351,6 +372,28 @@
         } else {
             console.log('No Formidable Forms detected on page - skipping location check');
         }
+        
+        // Handle forms that might be added to the page dynamically
+        // For example, via AJAX or after page load
+        var formCheckInterval = setInterval(function() {
+            if ($('.frm_forms').length > 0 && 
+                !$('.frm_forms').data('ffb-processed')) {
+                
+                console.log('New Formidable Forms detected - processing');
+                $('.frm_forms').data('ffb-processed', true);
+                
+                // Make sure new forms are visible by default
+                $('.frm_forms').show();
+                
+                // Re-check location for the new forms
+                checkUserLocation();
+            }
+        }, 1000); // Check every second
+        
+        // Stop checking after 30 seconds to avoid performance issues
+        setTimeout(function() {
+            clearInterval(formCheckInterval);
+        }, 30000);
     });
     
     // Debug function to help troubleshoot geolocation issues
