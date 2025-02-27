@@ -1,0 +1,19 @@
+# Ignore build directory
+/build/
+
+# Ignore development files
+.DS_Store
+node_modules/
+npm-debug.log
+yarn-error.log
+composer.lock
+vendor/
+.idea/
+.vscode/
+
+# Ignore WordPress environment files
+wp-config.php
+.htaccess
+
+# Ignore zip files
+*.zip

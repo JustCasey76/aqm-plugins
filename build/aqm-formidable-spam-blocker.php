@@ -3,7 +3,7 @@
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
  * Description: Block form submissions from specific countries, states, and zip codes.
- * Version: 1.9.0
+ * Version: 1.9.1
  * Author: AQMarketing
  * Author URI: https://aqmarketing.com
  * Text Domain: aqm-formidable-spam-blocker
@@ -206,9 +206,8 @@ class FormidableFormsBlocker {
             }, $this->approved_states);
             
             if ($geo_data && (isset($geo_data['region_code']) || isset($geo_data['region_name']) || isset($geo_data['region']))) {
-                // Get the region code from the appropriate field
+                // Get the region code, prioritizing region_code over region
                 $region_code = '';
-                
                 if (!empty($geo_data['region_code'])) {
                     $region_code = strtoupper(trim($geo_data['region_code']));
                 } elseif (!empty($geo_data['region'])) {
@@ -236,7 +235,7 @@ class FormidableFormsBlocker {
                     // Debug log
                     error_log('FFB: Checking state: ' . $region_code . ' against approved states: ' . implode(',', $approved_states));
                     
-                    // Check if the state is in the approved list
+                    // Check if the state code is in the approved list
                     if (in_array($region_code, $approved_states)) {
                         // State is approved, so we'll continue processing the form
                         error_log('FFB: State ' . $region_code . ' is in the approved list - allowing access');
@@ -718,10 +717,8 @@ class FormidableFormsBlocker {
             $approved_states = get_option('ffb_approved_states', []);
             if (!is_array($approved_states)) {
                 $approved_states = explode(',', $approved_states);
+                $approved_states = array_map('trim', $approved_states);
             }
-            $approved_states = array_map(function($state) {
-                return trim(strtoupper($state));
-            }, $approved_states);
             
             // Convert to uppercase for comparison
             $approved_states = array_map('strtoupper', $approved_states);
@@ -856,10 +853,10 @@ class FormidableFormsBlocker {
                                 $approved_states = get_option('ffb_approved_states', ['CA', 'NY', 'TX']);
                                 if (!is_array($approved_states)) {
                                     $approved_states = explode(',', $approved_states);
+                                    $approved_states = array_map('trim', $approved_states);
                                 }
-                                $approved_states = array_map(function($state) {
-                                    return trim(strtoupper($state));
-                                }, $approved_states);
+                                // Convert to uppercase for display
+                                $approved_states = array_map('strtoupper', $approved_states);
                             ?>
                             <input type="text" name="ffb_approved_states" value="<?php echo esc_attr(implode(',', $approved_states)); ?>" />
                             <p class="description">Enter comma-separated state codes (e.g., NY,CA,TX) to allow form submissions from these states.</p>

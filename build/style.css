@@ -63,6 +63,76 @@
     color: #dc3232;
 }
 
+/* IP Search Results Styling */
+#ffb_ip_search_results {
+    margin-top: 15px;
+}
+
+#ffb_ip_search_results h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #23282d;
+}
+
+#ffb_ip_search_results .widefat {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 15px;
+    background: #fff;
+}
+
+#ffb_ip_search_results .widefat td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+#ffb_ip_search_results .widefat tr:last-child td {
+    border-bottom: none;
+}
+
+#ffb_ip_search_results .widefat td:first-child {
+    width: 120px;
+    font-weight: 600;
+}
+
+/* Cache Management Styling */
+.ffb-cache-stats {
+    background: #f9f9f9;
+    padding: 15px;
+    border: 1px solid #ddd;
+    margin-bottom: 15px;
+    border-radius: 3px;
+}
+
+.ffb-cache-count {
+    font-size: 24px;
+    font-weight: bold;
+    color: #0073aa;
+    display: block;
+    margin-bottom: 5px;
+}
+
+.ffb-cache-label {
+    color: #666;
+    font-size: 14px;
+}
+
+/* Button Styling */
+.ffb-delete-ip, .ffb-allow-ip {
+    margin-right: 10px;
+}
+
+.ffb-delete-ip:hover {
+    background: #f1f1f1;
+    border-color: #d63638;
+    color: #d63638;
+}
+
+.ffb-allow-ip:hover {
+    background: #007017;
+    border-color: #007017;
+}
+
 /* Access Log Page Styles */
 .ffb-status {
     display: inline-block;

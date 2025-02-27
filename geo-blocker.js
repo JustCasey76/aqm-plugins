@@ -1,7 +1,7 @@
 /**
  * Formidable Forms Geo-Blocker JavaScript
  * Handles client-side geo-blocking for Formidable Forms
- * Version: 1.9.0
+ * Version: 1.9.1
  */
 
 (function($) {
@@ -79,184 +79,20 @@
             console.log('User IP:', userIp);
             
             // Now call the geolocation API with the correct URL format
+            var api_url = 'https://api.ipapi.com/api/' + userIp + '?access_key=' + ffbGeoBlocker.api_key + '&_nocache=' + new Date().getTime();
             $.ajax({
-                url: 'https://api.ipapi.com/api/' + userIp + '?access_key=' + ffbGeoBlocker.api_key + '&_nocache=' + new Date().getTime(),
-                method: 'GET',
+                url: api_url,
+                type: 'GET',
                 dataType: 'json',
-                cache: false,
                 success: function(response) {
-                    console.log('IPAPI Response:', response);
+                    console.log('API Response:', response);
                     
-                    // Check for API errors
-                    if (response && response.success === false) {
-                        console.log('IPAPI Error:', response.error ? response.error.info : 'Unknown error');
-                        return; // Allow form access if we can't determine location
-                    }
+                    // First, detect the location
+                    var locationInfo = detectUserLocation(response);
+                    console.log('Location detection results:', locationInfo);
                     
-                    // Check if we should block non-US IPs
-                    if (ffbGeoBlocker.block_non_us && response && response.country_code && response.country_code !== 'US') {
-                        console.log('Blocking due to non-US country:', response.country_code);
-                        hideFormidableForms('Forms are not available in your country.');
-                        return;
-                    }
-                    
-                    // Check if state is in the approved list
-                    if (response && ffbGeoBlocker.approved_states && ffbGeoBlocker.approved_states.length > 0) {
-                        // Get the region code from the appropriate field
-                        var region_code = '';
-                        var region_name = '';
-                        
-                        // Try different fields for region/state information
-                        if (response.region_code) {
-                            region_code = response.region_code.trim();
-                        } else if (response.region_name) {
-                            region_name = response.region_name.trim();
-                            // Try to convert full state name to code
-                            region_code = stateMap[region_name.toLowerCase()] || region_name;
-                        } else if (response.region) {
-                            region_name = response.region.trim();
-                            // Try to convert full state name to code
-                            region_code = stateMap[region_name.toLowerCase()] || region_name;
-                        }
-                        
-                        // Debug: Show the complete response object
-                        console.log('Complete API response:', JSON.stringify(response));
-                        console.log('ffbGeoBlocker object:', ffbGeoBlocker);
-                        
-                        if (region_code) {
-                            // Make sure approved_states is an array
-                            var approved_states = Array.isArray(ffbGeoBlocker.approved_states) ? 
-                                ffbGeoBlocker.approved_states : 
-                                (typeof ffbGeoBlocker.approved_states === 'string' ? 
-                                    ffbGeoBlocker.approved_states.split(',') : []);
-                            
-                            console.log('Checking state:', region_code);
-                            console.log('Region name from API:', region_name);
-                            console.log('Approved states (raw):', JSON.stringify(ffbGeoBlocker.approved_states));
-                            console.log('Approved states (processed):', JSON.stringify(approved_states));
-                            
-                            // Debug: Show each approved state individually
-                            for (var i = 0; i < approved_states.length; i++) {
-                                console.log('Approved state ' + i + ':', approved_states[i]);
-                            }
-                            
-                            // Debug: Show the complete response object
-                            console.log('Complete API response:', JSON.stringify(response));
-                            
-                            // Check if the state is in the approved list (case insensitive)
-                            var stateApproved = false;
-                            
-                            // Special check for Massachusetts
-                            if (region_code.toUpperCase() === 'MA' || 
-                                region_name.toUpperCase() === 'MASSACHUSETTS' || 
-                                region_code.toUpperCase() === 'MASSACHUSETTS' ||
-                                region_name.toUpperCase() === 'MASS' ||
-                                region_code.toUpperCase() === 'MASS') {
-                                console.log('MASSACHUSETTS DETECTED - checking if in approved list');
-                                
-                                // Check if MA is in the approved list (any variation)
-                                for (var i = 0; i < approved_states.length; i++) {
-                                    var state = approved_states[i].toUpperCase().trim();
-                                    console.log('Checking MA against approved state:', state);
-                                    if (state === 'MA' || state === 'MASSACHUSETTS' || state === 'MASS') {
-                                        console.log('Massachusetts is in the approved list - allowing access');
-                                        stateApproved = true;
-                                        break;
-                                    }
-                                }
-                                
-                                // If MA is approved, exit the function completely
-                                if (stateApproved) {
-                                    console.log('MA is approved, showing forms and exiting function');
-                                    return; // This exits the success callback
-                                }
-                            }
-                            
-                            // Regular check for other states
-                            if (!stateApproved) {
-                                for (var i = 0; i < approved_states.length; i++) {
-                                    var approvedState = approved_states[i].trim();
-                                    console.log('Comparing:', region_code.toUpperCase(), 'with', approvedState.toUpperCase());
-                                    
-                                    // Check for both the code and full name
-                                    if (approvedState.toUpperCase() === region_code.toUpperCase() || 
-                                        (region_name && region_name.toUpperCase() === approvedState.toUpperCase()) ||
-                                        (stateMap[approvedState.toLowerCase()] === region_code.toUpperCase())) {
-                                        stateApproved = true;
-                                        console.log('MATCH FOUND! State is approved');
-                                        break;
-                                    }
-                                }
-                            }
-                            
-                            console.log('State approved:', stateApproved);
-                            
-                            if (!stateApproved) {
-                                console.log('Blocking due to state not in approved list');
-                                hideFormidableForms('Forms are not available in your state.');
-                                return;
-                            } else {
-                                console.log('State is in approved list - showing forms and exiting function');
-                                // State is approved, so we'll show the forms and exit the function
-                                return;
-                            }
-                        } else {
-                            console.log('WARNING: Could not determine region code from API response');
-                        }
-                    }
-                    
-                    // Check if ZIP code is in the approved list
-                    if (response && ffbGeoBlocker.zip_validation_enabled && 
-                        ffbGeoBlocker.approved_zip_codes && 
-                        Array.isArray(ffbGeoBlocker.approved_zip_codes) && 
-                        ffbGeoBlocker.approved_zip_codes.length > 0) {
-                        
-                        console.log('ZIP validation is enabled and we have approved ZIP codes');
-                        
-                        // Get ZIP code from the appropriate field
-                        var postal_raw = response.zip || response.postal || '';
-                        
-                        if (postal_raw) {
-                            // Clean the ZIP code (remove spaces, dashes, etc.)
-                            var postal_code = postal_raw.replace(/[^0-9]/g, '');
-                            
-                            // Get just the first 5 digits for US ZIP codes
-                            if (postal_code.length > 5) {
-                                postal_code = postal_code.substring(0, 5);
-                            }
-                            
-                            // Make sure approved_zip_codes is an array
-                            var approved_zip_codes = Array.isArray(ffbGeoBlocker.approved_zip_codes) ? 
-                                ffbGeoBlocker.approved_zip_codes : 
-                                (typeof ffbGeoBlocker.approved_zip_codes === 'string' ? 
-                                    ffbGeoBlocker.approved_zip_codes.split(',') : []);
-                            
-                            console.log('Checking ZIP code:', postal_code);
-                            console.log('Approved ZIP codes:', approved_zip_codes);
-                            
-                            // Check if the ZIP code is not in the approved list
-                            var zipApproved = false;
-                            for (var i = 0; i < approved_zip_codes.length; i++) {
-                                console.log('Comparing ZIP:', postal_code, 'with', approved_zip_codes[i].trim());
-                                if (approved_zip_codes[i].trim() === postal_code) {
-                                    zipApproved = true;
-                                    break;
-                                }
-                            }
-                            
-                            console.log('ZIP approved:', zipApproved);
-                            
-                            if (!zipApproved) {
-                                console.log('Blocking due to ZIP code not in approved list');
-                                hideFormidableForms('Forms are not available in your ZIP code.');
-                                return;
-                            }
-                        } else {
-                            console.log('No ZIP code found in API response, skipping ZIP validation');
-                        }
-                    } else {
-                        console.log('ZIP validation is disabled or no approved ZIP codes');
-                    }
+                    // Then, apply access rules based on the detected location
+                    applyAccessRules(locationInfo);
                 },
                 error: function(xhr, status, error) {
                     console.log('Unable to determine location. Error:', error);
@@ -268,9 +104,198 @@
             console.log('Could not determine IP address');
         });
     }
+    
+    // Detect the user's location from API response
+    function detectUserLocation(response) {
+        var locationInfo = {
+            isUS: false,
+            state: {
+                code: '',
+                name: '',
+                isMassachusetts: false,
+                isApproved: false
+            },
+            zipCode: {
+                code: '',
+                isApproved: false
+            }
+        };
+        
+        // Check if the response is valid
+        if (!response) {
+            console.log('Invalid API response');
+            return locationInfo;
+        }
+        
+        // Check if user is in the US
+        locationInfo.isUS = response.country_code === 'US';
+        
+        // Get state information
+        var region_code = response.region_code || '';
+        var region_name = response.region || response.region_name || '';
+        
+        locationInfo.state.code = region_code;
+        locationInfo.state.name = region_name;
+        
+        console.log('Region Code:', region_code);
+        console.log('Region Name:', region_name);
+        console.log('Approved States:', ffbGeoBlocker.approved_states);
+        console.log('Complete API response:', JSON.stringify(response));
+        
+        // Make sure approved_states is an array
+        var approved_states = Array.isArray(ffbGeoBlocker.approved_states) ? 
+            ffbGeoBlocker.approved_states : 
+            (typeof ffbGeoBlocker.approved_states === 'string' ? 
+                ffbGeoBlocker.approved_states.split(',') : []);
+        
+        // Check if the location is Massachusetts
+        locationInfo.state.isMassachusetts = 
+            region_code.toUpperCase() === 'MA' || 
+            region_name.toUpperCase() === 'MASSACHUSETTS' || 
+            region_code.toUpperCase() === 'MASSACHUSETTS' ||
+            region_name.toUpperCase() === 'MASS' ||
+            region_code.toUpperCase() === 'MASS' ||
+            (response.region_name && response.region_name.toUpperCase() === 'MASSACHUSETTS') ||
+            (response.region && response.region.toUpperCase() === 'MASSACHUSETTS');
+        
+        if (locationInfo.state.isMassachusetts) {
+            console.log('MASSACHUSETTS DETECTED - checking if in approved list');
+            
+            // Check if MA is in the approved list (any variation)
+            for (var i = 0; i < approved_states.length; i++) {
+                var state = approved_states[i].toUpperCase().trim();
+                console.log('Checking MA against approved state:', state);
+                if (state === 'MA' || state === 'MASSACHUSETTS' || state === 'MASS') {
+                    console.log('Massachusetts is in the approved list');
+                    locationInfo.state.isApproved = true;
+                    break;
+                }
+            }
+        } else {
+            // Regular check for other states
+            for (var i = 0; i < approved_states.length; i++) {
+                var approvedState = approved_states[i].trim();
+                console.log('Comparing:', region_code.toUpperCase(), 'with', approvedState.toUpperCase());
+                
+                // Check for both the code and full name
+                if (approvedState.toUpperCase() === region_code.toUpperCase() || 
+                    (region_name && region_name.toUpperCase() === approvedState.toUpperCase()) ||
+                    (stateMap[approvedState.toLowerCase()] === region_code.toUpperCase())) {
+                    locationInfo.state.isApproved = true;
+                    console.log('MATCH FOUND! State is approved');
+                    break;
+                }
+            }
+        }
+        
+        // Get ZIP code information if available
+        if (response.zip || response.postal) {
+            var postal_raw = response.zip || response.postal || '';
+            
+            if (postal_raw) {
+                // Clean the ZIP code (remove spaces, dashes, etc.)
+                var postal_code = postal_raw.replace(/[^0-9]/g, '');
+                
+                // Get just the first 5 digits for US ZIP codes
+                if (postal_code.length > 5) {
+                    postal_code = postal_code.substring(0, 5);
+                }
+                
+                locationInfo.zipCode.code = postal_code;
+                
+                // Check if ZIP validation is enabled and we have approved ZIP codes
+                if (ffbGeoBlocker.zip_validation_enabled && 
+                    ffbGeoBlocker.approved_zip_codes && 
+                    Array.isArray(ffbGeoBlocker.approved_zip_codes) && 
+                    ffbGeoBlocker.approved_zip_codes.length > 0) {
+                    
+                    console.log('ZIP validation is enabled and we have approved ZIP codes');
+                    console.log('ZIP validation enabled:', ffbGeoBlocker.zip_validation_enabled);
+                    console.log('Approved ZIP codes:', ffbGeoBlocker.approved_zip_codes);
+                    console.log('Checking ZIP code against approved list...');
+                    
+                    // Make sure approved_zip_codes is an array
+                    var approved_zip_codes = Array.isArray(ffbGeoBlocker.approved_zip_codes) ? 
+                        ffbGeoBlocker.approved_zip_codes : 
+                        (typeof ffbGeoBlocker.approved_zip_codes === 'string' ? 
+                            ffbGeoBlocker.approved_zip_codes.split(',') : []);
+                    
+                    console.log('Checking ZIP code:', postal_code);
+                    console.log('Approved ZIP codes:', approved_zip_codes);
+                    
+                    // Check if the ZIP code is in the approved list
+                    for (var i = 0; i < approved_zip_codes.length; i++) {
+                        console.log('Comparing ZIP:', postal_code, 'with', approved_zip_codes[i].trim());
+                        if (approved_zip_codes[i].trim() === postal_code) {
+                            locationInfo.zipCode.isApproved = true;
+                            break;
+                        }
+                    }
+                    
+                    console.log('ZIP approved:', locationInfo.zipCode.isApproved);
+                } else {
+                    // If ZIP validation is not enabled, consider it approved
+                    locationInfo.zipCode.isApproved = true;
+                    console.log('ZIP validation is disabled or no approved ZIP codes');
+                }
+            }
+        } else {
+            // If no ZIP code is found, consider it approved
+            locationInfo.zipCode.isApproved = true;
+            console.log('No ZIP code found in API response');
+        }
+        
+        return locationInfo;
+    }
+    
+    // Apply access rules based on detected location
+    function applyAccessRules(locationInfo) {
+        console.log('Applying access rules based on location:', locationInfo);
+        
+        // Check if we should block non-US IPs
+        if (ffbGeoBlocker.block_non_us && !locationInfo.isUS) {
+            console.log('Blocking due to non-US country');
+            hideFormidableForms('Forms are only available in the United States.');
+            return;
+        }
+        
+        // Check Massachusetts specifically (since we have special logic for it)
+        if (locationInfo.state.isMassachusetts) {
+            if (!locationInfo.state.isApproved) {
+                console.log('MA is not approved, blocking access');
+                hideFormidableForms('Forms are not available in your state.');
+                return;
+            } else {
+                console.log('MA is approved, showing forms and exiting function');
+                // Explicitly ensure forms are visible
+                $('.frm_forms').show();
+                return; // Allow access
+            }
+        }
+        
+        // Check state approval for other states
+        if (!locationInfo.state.isApproved) {
+            console.log('State is not approved, blocking access');
+            hideFormidableForms('Forms are not available in your state.');
+            return;
+        }
+        
+        // Check ZIP code approval if state is approved
+        if (ffbGeoBlocker.zip_validation_enabled && !locationInfo.zipCode.isApproved) {
+            console.log('ZIP code is not approved, blocking access');
+            hideFormidableForms('Forms are not available in your ZIP code.');
+            return;
+        }
+        
+        // If we get here, access is allowed
+        console.log('All checks passed, allowing access');
+        // Explicitly ensure forms are visible
+        $('.frm_forms').show();
+    }
 
     // Hide all Formidable Forms and display a message
     function hideFormidableForms(message) {
+        console.log('Hiding forms with message:', message);
         $('.frm_forms').each(function() {
             $(this).html('<p class="ffb-blocked-message">' + message + '</p>');
         });
@@ -296,6 +321,7 @@
         
         // Add a timestamp to avoid browser caching
         console.log('Initializing geo-blocker.js at ' + new Date().toISOString());
+        console.log('ffbGeoBlocker object:', ffbGeoBlocker);
         
         // Add debug button for troubleshooting (only visible in admin mode)
         if (ffbGeoBlocker.is_admin) {
@@ -312,6 +338,9 @@
             $('[class*="frm"]').length > 0) {
             
             console.log('Formidable Forms detected on page - checking location');
+            // Make sure forms are visible by default
+            $('.frm_forms').show();
+            
             // Check user location
             checkUserLocation();
             
@@ -363,13 +392,17 @@
                                          region_name.toUpperCase() === 'MASSACHUSETTS' || 
                                          region_code.toUpperCase() === 'MASSACHUSETTS' ||
                                          region_name.toUpperCase() === 'MASS' ||
-                                         region_code.toUpperCase() === 'MASS');
+                                         region_code.toUpperCase() === 'MASS' ||
+                                         (response.region_name && response.region_name.toUpperCase() === 'MASSACHUSETTS') ||
+                                         (response.region && response.region.toUpperCase() === 'MASSACHUSETTS'));
                     
                     // Check if state is approved
                     if (isMassachusetts) {
                         for (var i = 0; i < ffbGeoBlocker.approved_states.length; i++) {
                             var state = ffbGeoBlocker.approved_states[i].toUpperCase().trim();
+                            console.log('Checking MA against approved state:', state);
                             if (state === 'MA' || state === 'MASSACHUSETTS' || state === 'MASS') {
+                                console.log('Massachusetts is in the approved list');
                                 stateApproved = true;
                                 break;
                             }
@@ -381,6 +414,7 @@
                             if (approvedState.toUpperCase() === region_code.toUpperCase() || 
                                 (region_name && region_name.toUpperCase() === approvedState.toUpperCase())) {
                                 stateApproved = true;
+                                console.log('MATCH FOUND! State is approved');
                                 break;
                             }
                         }

@@ -182,8 +182,11 @@ class AQM_Plugin_Updater {
                 }
             }
             
-            // If no ZIP asset found, use the source code ZIP
-            if (empty($download_url)) {
+            // If no ZIP asset found, use the source code ZIP - BUT ONLY AS LAST RESORT
+            // Prefer to use the clean release asset created by GitHub Actions
+            if (empty($download_url) && isset($release_info->zipball_url)) {
+                // Log that we're using the source code ZIP as a fallback
+                error_log('AQM Plugin Updater: No release asset found, falling back to source code ZIP');
                 $download_url = $release_info->zipball_url;
             }
             
@@ -264,8 +267,11 @@ class AQM_Plugin_Updater {
             }
         }
         
-        // If no ZIP asset found, use the source code ZIP
-        if (empty($download_url)) {
+        // If no ZIP asset found, use the source code ZIP - BUT ONLY AS LAST RESORT
+        // Prefer to use the clean release asset created by GitHub Actions
+        if (empty($download_url) && isset($release_info->zipball_url)) {
+            // Log that we're using the source code ZIP as a fallback
+            error_log('AQM Plugin Updater: No release asset found, falling back to source code ZIP');
             $download_url = $release_info->zipball_url;
         }
         
