@@ -3,7 +3,7 @@
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
  * Description: Block form submissions from specific countries, states, and zip codes.
- * Version: 1.6.9
+ * Version: 1.7.0
  * Author: AQMarketing
  * Author URI: https://aqmarketing.com
  * Text Domain: aqm-formidable-spam-blocker
@@ -87,10 +87,11 @@ class FormidableFormsBlocker {
     }
 
     public function enqueue_scripts() {
-        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.6.9', true);
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.6.9');
+        wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', ['jquery'], '1.7.0', true);
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', [], '1.7.0');
         wp_localize_script('ffb-geo-blocker', 'ffbGeoBlocker', [
-            'api_url' => 'https://api.ipapi.com/check?access_key=' . $this->api_key . '&ip=',
+            'api_url' => 'https://api.ipapi.com/api/',
+            'api_key' => get_option('ffb_api_key', $this->api_key),
             'approved_states' => $this->approved_states,
             'approved_zip_codes' => $this->approved_zip_codes,
             'block_non_us' => get_option('ffb_block_non_us', '1') === '1'
@@ -432,7 +433,7 @@ class FormidableFormsBlocker {
         
         // Test the API key with a known IP (Google's DNS)
         $test_ip = '8.8.8.8';
-        $geo_data = wp_remote_get("https://api.ipapi.com/check?access_key={$api_key}&ip={$test_ip}");
+        $geo_data = wp_remote_get("https://api.ipapi.com/api/{$test_ip}?access_key={$api_key}");
         
         if (is_wp_error($geo_data)) {
             $error_message = 'API Error: ' . $geo_data->get_error_message();
@@ -581,7 +582,7 @@ class FormidableFormsBlocker {
         error_log('IPAPI Test - API Key: ' . (empty($api_key) ? 'Empty' : 'Present (not shown for security)'));
         
         // Log the API URL we're calling
-        $api_url = "https://api.ipapi.com/check?access_key={$api_key}&ip={$user_ip}";
+        $api_url = "https://api.ipapi.com/api/{$user_ip}?access_key={$api_key}";
         error_log('IPAPI Test - API URL: ' . preg_replace('/access_key=([^&]+)/', 'access_key=HIDDEN', $api_url));
         
         // Make a direct API call to see the raw response
@@ -1247,8 +1248,8 @@ class FormidableFormsBlocker {
             return false;
         }
         
-        // Make API call
-        $api_url = "https://api.ipapi.com/check?access_key={$api_key}&ip={$user_ip}";
+        // Make API call with correct URL format
+        $api_url = "https://api.ipapi.com/api/{$user_ip}?access_key={$api_key}";
         $response = wp_remote_get($api_url);
         
         if (is_wp_error($response)) {

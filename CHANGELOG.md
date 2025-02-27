@@ -1,5 +1,12 @@
 # AQM Formidable Forms Spam Blocker Changelog
 
+## 1.7.0 - February 26, 2025
+- Fixed API endpoint URL format to match ipapi.com documentation
+- Updated client-side geolocation to use correct API endpoint format
+- Added IP address detection using ipify.org for client-side validation
+- Improved API response handling for both server and client sides
+- Enhanced error logging with more detailed API request information
+
 ## 1.6.9 - February 26, 2025
 - Enhanced API error handling and logging
 - Improved API key validation with detailed error messages
