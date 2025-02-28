@@ -648,6 +648,22 @@ class FormidableFormsBlocker {
         <div class="wrap">
             <h1>AQM Security Settings</h1>
             
+            <?php
+            // Display API usage if available
+            $usage = $this->get_api_usage();
+            if ($usage && isset($usage['usage'])) {
+                echo '<div class="card" style="max-width: 100%; margin-bottom: 20px; padding: 10px 20px;">';
+                echo '<h2>API Usage Statistics</h2>';
+                echo '<table class="form-table" style="margin-top: 0;">';
+                echo '<tr><th>Monthly Usage</th><td>' . esc_html($usage['usage']['month_usage']) . ' / ' . esc_html($usage['usage']['limit']) . ' requests</td></tr>';
+                if (isset($usage['usage']['rate_limits'])) {
+                    echo '<tr><th>Rate Limit</th><td>' . esc_html($usage['usage']['rate_limits']['minute']) . ' requests per minute</td></tr>';
+                }
+                echo '</table>';
+                echo '</div>';
+            }
+            ?>
+
             <form method="post" action="options.php">
                 <?php
                 settings_fields('ffb_settings');
@@ -1352,6 +1368,32 @@ class FormidableFormsBlocker {
         return $geo_data;
     }
     
+    /**
+     * Get API usage data
+     */
+    private function get_api_usage() {
+        $api_key = defined('FFB_API_KEY') ? FFB_API_KEY : get_option('ffb_api_key', '');
+        if (empty($api_key)) {
+            return false;
+        }
+
+        $url = 'https://api.ipapi.com/api/usage?access_key=' . $api_key;
+        $response = wp_remote_get($url);
+
+        if (is_wp_error($response)) {
+            return false;
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if (!$data || isset($data['error'])) {
+            return false;
+        }
+
+        return $data;
+    }
+
     /**
      * Clear the IP cache
      */
