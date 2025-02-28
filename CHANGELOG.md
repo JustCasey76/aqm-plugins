@@ -1,5 +1,12 @@
 # AQM Formidable Forms Spam Blocker Changelog
 
+## [2.0.1] - 2025-02-28
+### Fixed
+- Improved form blocking mechanism to only target Formidable Forms
+- Enhanced geolocation API response handling with better error checking
+- Added caching for geolocation data to improve performance
+- Fixed form display hooks to prevent interference with non-form content
+
 ## [2.0.0] - 2025-02-28
 ### Added
 - Support for multiple country filtering
