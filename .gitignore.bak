@@ -1,3 +1,6 @@
+# Ignore build directory
+/build/
+
 # Ignore development files
 .DS_Store
 node_modules/

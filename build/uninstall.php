@@ -10,8 +10,8 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
 
 // Delete all options created by the plugin
 delete_option('ffb_approved_states');
+delete_option('ffb_approved_countries');
 delete_option('ffb_approved_zip_codes');
-delete_option('ffb_block_non_us');
 delete_option('ffb_rate_limit_requests');
 delete_option('ffb_rate_limit_time');
 delete_option('ffb_api_key');

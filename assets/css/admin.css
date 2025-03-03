@@ -1,0 +1,92 @@
+/**
+ * AQM Formidable Forms Spam Blocker Admin Styles
+ * Version: 2.1.2
+ */
+
+/* General styles */
+.wrap h1 {
+    margin-bottom: 20px;
+}
+
+/* Form styles */
+.form-table th {
+    width: 200px;
+}
+
+/* API Test result styles */
+#ffb-api-test-result {
+    margin-left: 10px;
+    padding: 5px 10px;
+    display: inline-block;
+}
+
+#ffb-api-test-result.success {
+    color: #46b450;
+    background-color: #ecf7ed;
+    border: 1px solid #c7e8ca;
+}
+
+#ffb-api-test-result.error {
+    color: #dc3232;
+    background-color: #fbeaea;
+    border: 1px solid #f9c2c2;
+}
+
+/* IP Search result styles */
+#ffb-ip-search-result {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #f8f8f8;
+    border: 1px solid #ddd;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Button spacing */
+.button {
+    margin-right: 5px;
+}
+
+/* Status indicators */
+.ffb-status {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+.ffb-status.allowed {
+    background-color: #ecf7ed;
+    color: #46b450;
+}
+
+.ffb-status.blocked {
+    background-color: #fbeaea;
+    color: #dc3232;
+}
+
+/* Log table styles */
+.ffb-log-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.ffb-log-table th,
+.ffb-log-table td {
+    padding: 8px;
+    text-align: left;
+    border: 1px solid #ddd;
+}
+
+.ffb-log-table th {
+    background-color: #f2f2f2;
+}
+
+.ffb-log-table tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.ffb-log-table tr:hover {
+    background-color: #f1f1f1;
+}

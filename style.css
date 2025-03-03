@@ -1,16 +1,60 @@
 /**
  * Formidable Forms State & ZIP Code Blocker Styles
+ * Version: 2.1.64
  */
 
 .ffb-blocked-message {
     background-color: #f8d7da;
     color: #721c24;
-    padding: 15px;
-    margin-bottom: 20px;
-    border: 1px solid #f5c6cb;
+    padding: 20px;
+    margin: 20px 0;
+    border: 2px solid #f5c6cb;
     border-radius: 4px;
     font-size: 16px;
     text-align: center;
+    position: relative;
+    z-index: 9999 !important;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    font-weight: bold;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+.ffb-blocked-message .frm_error_style {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: inherit;
+    box-shadow: none;
+}
+
+.ffb-blocked {
+    position: relative;
+}
+
+/* Strong form hiding to prevent display */
+.ffb-blocked form {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+    position: absolute !important;
+    left: -9999px !important;
+}
+
+/* Ensure display remains none after form interactions */
+.ffb-blocked form.frm_pro_form,
+.ffb-blocked form.frm_form_id_*,
+.ffb-blocked form.frm_submit,
+.ffb-blocked form input,
+.ffb-blocked form select,
+.ffb-blocked form button,
+.ffb-blocked form .frm_submit {
+    display: none !important;
 }
 
 /* Admin settings page styles */
@@ -160,6 +204,78 @@
 .ffb-status-admin_action {
     background-color: #cce5ff;
     color: #004085;
+}
+
+/* Access Log Filters */
+.ffb-filters {
+    background: #fff;
+    padding: 15px;
+    margin-bottom: 20px;
+    border: 1px solid #ccd0d4;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+}
+
+.ffb-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: flex-end;
+}
+
+.ffb-filter-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-weight: 600;
+}
+
+.ffb-filter-row input[type="text"],
+.ffb-filter-row input[type="date"],
+.ffb-filter-row select {
+    min-width: 150px;
+    padding: 5px;
+}
+
+.ffb-filter-row .button {
+    margin-bottom: 2px;
+}
+
+/* Pagination Styles */
+.tablenav-pages {
+    margin-top: 15px;
+    text-align: right;
+}
+
+.tablenav-pages .pagination-links {
+    display: inline-block;
+}
+
+.tablenav-pages .page-numbers {
+    display: inline-block;
+    min-width: 30px;
+    height: 30px;
+    margin: 0 2px;
+    padding: 0 4px;
+    font-size: 13px;
+    line-height: 28px;
+    text-align: center;
+    text-decoration: none;
+    color: #646970;
+    border: 1px solid #8c8f94;
+    border-radius: 3px;
+    background: #f6f7f7;
+}
+
+.tablenav-pages .page-numbers.current {
+    border-color: #646970;
+    color: #fff;
+    background: #646970;
+}
+
+.tablenav-pages .page-numbers:hover {
+    color: #135e96;
+    border-color: #135e96;
+    background: #f0f0f1;
 }
 
 /* Pagination styles */

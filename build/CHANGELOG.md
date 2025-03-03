@@ -1,5 +1,249 @@
 # AQM Formidable Forms Spam Blocker Changelog
 
+## [2.1.64] - 2024-06-03
+- Enhanced geolocation detection to properly capture various region/state formats from different APIs
+- Fixed issue where region/state was showing as "Unknown" in logs
+- Added comprehensive debug logging for API responses to identify available fields
+- Improved settings redirect handling with fallback for when headers are already sent
+- Added multiple region code format detection (region_code, regionCode, etc)
+
+## [2.1.63] - 2025-03-02
+### Fixed
+- Fixed intermittent issue with geolocation-blocked message disappearing
+- Added MutationObserver to ensure blocked message persistence
+- Enhanced CSS styling for the blocked message to make it more prominent
+- Updated geo-blocker.js to latest version (2.1.62)
+
+## [2.1.62] - 2025-03-02
+### Changed
+- Renamed "Region" to "State" in access logs for improved clarity
+- Updated column headers and filter labels to use "State" consistently
+
+## [2.1.61] - 2025-03-04
+### Fixed
+- Fixed form submission issue where settings were lost due to nested forms
+- Resolved form conflict by moving create table form outside main settings form
+
+## [2.1.60] - 2025-03-04
+### Fixed
+- Fixed nonce field name mismatch for create table action
+- Changed nonce field name in direct-settings.php to match the field name in settings.php template
+
+## [2.1.59] - 2025-03-02
+### Fixed
+- Added multiple WordPress loading paths to ensure compatibility across different hosting environments
+- Fixed settings not being saved properly when using direct-settings.php
+
+## [2.1.58] - 2025-03-02
+### Fixed
+- Fixed settings form getting stuck on admin-post.php by switching to direct-settings.php form processing
+- Added improved JavaScript redirects with console logging for better debugging
+- Enhanced form submission handling to avoid redirect issues
+
+## [2.1.57] - 2025-03-02
+- Fixed undefined $table_exists variable in settings.php
+- Fixed "Array to string conversion" warning in approved_zip_codes handling
+- Added better descriptions for input fields
+
+## [2.1.56] - 2025-03-02
+### Fixed
+- Fixed settings page getting stuck on admin-post.php by resolving conflicting action hooks
+- Added additional debug logging to help diagnose settings saving issues
+
+## [2.1.55] - 2025-03-02
+### Fixed
+- Fixed PHP fatal error "Cannot redeclare clear_geo_cache()" by removing duplicate function declaration
+- Ensured all changes are properly synchronized between main plugin file and build directory
+
+## [2.1.54] - 2025-03-02
+### Fixed
+- Fixed settings saving issue by properly registering the standalone handle_save_settings function with admin_post_ffb_save_settings action
+- Changed settings form to use admin-post.php instead of direct-settings.php
+- Ensured consistent settings saving between main plugin and class methods
+
+## [2.1.53] - 2025-03-02
+### Fixed
+- Modified API testing to use admin's actual IP address instead of hardcoded Google DNS IP (8.8.8.8)
+- Updated standalone API test script to also use actual IP address
+
+## [2.1.52] - 2025-03-02
+### Fixed
+- Reverted settings form submission to use direct-settings.php after debugging
+- Ensure both main and build directories are consistent
+
+## [2.1.51] - 2025-03-02
+### Fixed
+- Added debugging script to diagnose settings saving issues
+- Temporarily redirected settings form to debugging handler
+
+## [2.1.50] - 2025-03-02
+### Fixed
+- Fixed issue with settings not saving on some servers by migrating from direct-settings.php to admin-post.php
+- Added proper handler for settings form submission
+
+## [2.1.49] - 2025-03-02
+### Fixed
+- Fixed "undefined" issue when testing API key by updating the AJAX response format
+- Updated wp_send_json_success() call to provide properly structured response data
+
+## [2.1.48] - 2025-03-02
+### Fixed
+- Fixed blank settings page issue by properly including the settings template file
+- Added missing template inclusion code to the settings_page method
+
+## [2.1.47] - 2025-03-02
+### Fixed
+- Fixed redirect loop issue that was causing the settings page to continuously refresh
+- Removed final fallback JavaScript redirect that was causing infinite page refreshes
+
+## [2.1.46] - 2025-03-02
+### Fixed
+- Fixed URL redirection issue that was causing admin pages to get stuck with "#038;" in the URL
+- Modified redirect URL generation to prevent double encoding of ampersands
+- Updated all redirect mechanisms to use a more reliable approach for URL construction
+
+## [2.1.45] - 2025-03-04
+### Fixed
+- Fixed PHP syntax error "unexpected token 'private'" by converting the clear_geo_cache method from a class method to a global function
+- Removed references to $this inside the global clear_geo_cache function
+- Modified all instances of $this->clear_geo_cache() to use the global clear_geo_cache() function
+
+## [2.1.44] - 2025-03-04
+### Fixed
+- Fixed PHP syntax error on line 1657 by adding missing try statement in the settings form processing
+- Properly structured the try-catch block in the save_settings method
+- Removed malformed PHP code after the catch block that may have been causing additional syntax errors
+- Simplified the redirect logic to ensure better compatibility with different PHP versions
+
+## [2.1.43] - 2025-03-03
+### Fixed
+- Fixed all remaining admin-post.php references to use direct-settings.php instead
+- Updated settings.php form actions to use direct-settings.php
+- Updated logs page "Clear Logs" form to use direct-settings.php
+- Added "Clear Logs" action handling to direct-settings.php
+- Added redirect_to parameters to all forms for proper redirection after processing
+
+## [2.1.42] - 2025-03-03
+### Fixed
+- Added "Create Table" action handling to direct-settings.php to support database table recreation
+- Improved form processing logic with better action type detection and error handling
+- Enhanced redirect handling for both settings save and table creation actions
+- Added detailed logging for table creation process
+
+## [2.1.41] - 2025-03-02
+### Fixed
+- Fixed settings page redirect issue with admin-post.php by completely rewriting the save_settings method
+- Added multiple fallback redirect mechanisms for different server environments
+- Improved output buffer handling to prevent "headers already sent" errors
+- Added early output buffering to capture and clean any unexpected output
+- Increased timeout limit to prevent issues with slow servers
+
+## [2.1.40] - 2025-03-02
+### Fixed
+- Fixed database table structure to include missing columns: 'country', 'region', 'city', 'zip'
+- Fixed PHP fatal error by replacing calls to undefined method log_access() with log_access_attempt()
+- Fixed parameter mismatches in log_access_attempt method calls
+
+## [2.1.39] - 2025-03-02
+### Fixed
+- Fixed settings saving issue where admin-post.php would get stuck during redirect
+- Added timeout limit to prevent hanging during settings save process
+- Improved error handling with try/catch block in save_settings function
+- Added buffer flushing before redirect to prevent output issues
+- Switched to wp_safe_redirect for better security
+
+## [2.1.38] - 2025-03-02
+### Fixed
+- Fixed undefined variable $current_time in get_api_usage function
+
+## [2.1.37] - 2025-03-01
+### Added
+- Enhanced debug logging throughout the save_settings function to diagnose redirect issues
+- Added detailed step-by-step logging for settings saving process
+- Added logging for request URI, method, and POST data
+- Added more granular error reporting for nonce verification
+
+### Fixed
+- Improved error handling for API key saving
+- Added alternate redirect method when headers are already sent
+- Better tracking of settings update process
+
+## [2.1.36] - 2025-03-01
+- Fixed JavaScript error handling in admin.js
+- Added comprehensive error logging for API key testing
+- Fixed AJAX nonce verification to use consistent 'ffb_admin_nonce'
+- Updated version number in all files
+- Fixed API URL format to use access_key parameter instead of key
+- Added timeout and user-agent to API requests to improve reliability
+- Enhanced debug logging for API URLs
+- Added API key format validation before making API requests
+- Created standalone API test script for direct testing
+
+## [2.1.35] - 2025-03-02
+- Improved JavaScript structure with IIFE pattern for better encapsulation
+- Enhanced fallback mechanism for ffbAdminVars with descriptive error message
+- Added version header comment to admin.js
+- Added fallback for undefined ajaxurl variable
+
+## [2.1.34] - 2025-03-01
+- Fixed JavaScript error on admin page by ensuring ffbAdminVars is properly defined
+- Added admin-fix.js script to provide fallback for ffbAdminVars
+- Removed duplicate admin.js file from build directory
+- Updated build script to prevent duplicate JavaScript files
+- Improved error handling in admin JavaScript
+
+## [2.1.33] - 2025-03-01
+- Enhanced settings page save functionality with improved error handling
+- Added fallback JavaScript redirect for cases where headers are already sent
+- Added detailed logging for debugging settings save issues
+- Changed database table name to be more unique (aqm_formidable_spam_blocker_log)
+- Added automatic migration from old table name to new table name
+
+## [2.1.32] - 2025-03-03
+- Fixed settings page save functionality
+- Added proper redirect after saving settings
+- Implemented transient-based success message display
+
+## [2.1.31] - 2025-03-02
+- Reverted back to ipapi.com API service
+- Fixed API parameter names (access_key instead of key)
+- Updated response field handling to match ipapi.com format
+- Resolved API connection issues
+
+## [2.1.30] - 2025-03-01
+- Switched from ipapi.com to ip-api.com for more reliable geolocation services
+- Updated API integration to use the new service's endpoint format
+- Modified code to handle the different response format from the new API service
+- Fixed parameter names for API requests (key instead of access_key)
+
+## [2.1.29] - 2025-03-01
+- Fixed geolocation API error handling to properly allow forms when API returns errors
+- Improved country detection logic to prevent false blocks
+- Enhanced error checking for incomplete location data
+- Disabled test IP (8.8.8.8) to use real client IP for geolocation
+- Added cache busting for JavaScript files to ensure latest version is loaded
+- Completely removed test IP code to prevent any possibility of it being used
+
+## [2.1.28] - 2023-07-15
+- Fixed location checking to handle API errors more gracefully
+- Added fallback to allow forms when API connection fails
+- Improved error handling for settings submission
+- Added more detailed logging for debugging purposes
+- Updated API URL to use HTTPS instead of HTTP for better security
+- Added test IP for easier debugging of geolocation issues
+
+## [2.1.27] - 2025-03-02
+- Fixed state blocking logic to properly block submissions from non-approved states
+- Changed default behavior to fail closed (block) instead of fail open (allow) for better security
+- Improved handling of empty approved states list to block all states when none are specified
+- Enhanced error logging for state checking
+
+## [2.1.26] - 2025-03-02
+- Fixed database logging functionality with updated table schema
+- Added improved table structure check and update on plugin activation
+- Enhanced logging fields to match actual data being stored
+- Fixed potential issues with database field mismatches
+
 ## [2.1.25] - 2025-03-01
 - Fixed PHP fatal error: Added missing is_ip_blacklisted() method
 - Added support for wildcard IP matching in blacklist (e.g., 192.168.*)
