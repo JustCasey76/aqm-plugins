@@ -1,6 +1,6 @@
 /**
  * AQM Formidable Forms Spam Blocker - Geolocation Script
- * Version: 2.1.64
+ * Version: 2.1.66
  * 
  * This script handles the geolocation check for Formidable Forms
  */
@@ -297,7 +297,7 @@
     
     /**
      * Get the user's IP address - ALWAYS use client IP in production
-     * Version: 2.1.64
+     * Version: 2.1.66
      */
     var getUserIP = function() {
         // Return empty string for ipapi.com to use the client's IP

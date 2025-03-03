@@ -2,8 +2,8 @@
 /**
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
- * Description: Block spam submissions in Formidable Forms based on IP geolocation.
- * Version: 2.1.64
+ * Description: Block form submissions based on IP geolocation and other criteria.
+ * Version: 2.1.66
  * Author: AQ Marketing
  * Author URI: https://aqmarketing.com
  * Text Domain: aqm-formidable-spam-blocker
@@ -40,7 +40,7 @@ class FormidableFormsBlocker {
     private $rate_limit_requests = 3; // Max requests per IP in timeframe
     private $blocked_ips = array(); // IPs to block for testing
     private $log_enabled = true; // Whether to log access attempts
-    private $version = '2.1.64';
+    private $version = '2.1.66';
     private $geo_data = null;
     private $is_blocked = null;
     private $blocked_message = ''; // Blocked message
@@ -48,7 +48,7 @@ class FormidableFormsBlocker {
 
     public function __construct() {
         // Set version
-        $this->version = '2.1.64';
+        $this->version = '2.1.66';
         
         // Initialize properties
         $this->init_properties();
@@ -930,11 +930,11 @@ class FormidableFormsBlocker {
         wp_enqueue_script('jquery');
         
         // Enqueue the geo-blocker script with cache busting
-        $js_version = '2.1.64-' . time(); // Add timestamp for cache busting
+        $js_version = '2.1.66-' . time(); // Add timestamp for cache busting
         wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', array('jquery'), $js_version, true);
         
         // Enqueue the styles
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', array(), '2.1.64');
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', array(), '2.1.66');
         
         // Add honeypot CSS
         $honeypot_css = "
@@ -1011,10 +1011,10 @@ class FormidableFormsBlocker {
         wp_enqueue_style('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css', array(), '4.1.0');
         
         // Enqueue our admin script
-        wp_enqueue_script('ffb-admin', plugin_dir_url(__FILE__) . 'assets/js/admin.js', array('jquery', 'jquery-ui-tabs', 'select2'), '2.1.64', true);
+        wp_enqueue_script('ffb-admin', plugin_dir_url(__FILE__) . 'assets/js/admin.js', array('jquery', 'jquery-ui-tabs', 'select2'), '2.1.66', true);
         
         // Enqueue our admin styles
-        wp_enqueue_style('ffb-admin-styles', plugin_dir_url(__FILE__) . 'assets/css/admin.css', array(), '2.1.64');
+        wp_enqueue_style('ffb-admin-styles', plugin_dir_url(__FILE__) . 'assets/css/admin.css', array(), '2.1.66');
         
         // Pass data to the script
         wp_localize_script('ffb-admin', 'ffbAdminVars', array(
@@ -1216,7 +1216,7 @@ class FormidableFormsBlocker {
         
         // Log the allowed access
         $country_name = isset($geo_data['country_name']) ? $geo_data['country_name'] : 'Unknown';
-        $region_name = isset($geo_data['region']) ? $geo_data['region'] : 'Unknown';
+        $region_name = isset($geo_data['region_name']) ? $geo_data['region_name'] : 'Unknown';
         $this->log_access_attempt($ip, 'allowed', 'Location allowed', $this->get_form_id_from_content($content), 'form_load');
         
         // Allow the form to be displayed
@@ -2320,7 +2320,7 @@ function ffb_create_log_table() {
     dbDelta($sql);
         
     // Update the DB version option to track that we've created the table
-    update_option('ffb_db_version', '2.1.64');
+    update_option('ffb_db_version', '2.1.66');
     error_log('FFB Debug: Created access log table');
 }
 
@@ -2346,7 +2346,7 @@ function ffb_handle_db_migration() {
     }
     
     // Update DB version
-    update_option('ffb_db_version', '2.1.64');
+    update_option('ffb_db_version', '2.1.66');
 }
 
 // Handle database migration on plugin load

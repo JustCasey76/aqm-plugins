@@ -101,7 +101,7 @@
         <?php
         // Check if the table exists
         global $wpdb;
-        $table_name = $wpdb->prefix . 'ffb_access_log';
+        $table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
         $table_exists = ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") === $table_name);
         ?>
         <table class="form-table">

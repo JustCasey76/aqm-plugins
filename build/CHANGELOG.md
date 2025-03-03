@@ -1,5 +1,16 @@
 # AQM Formidable Forms Spam Blocker Changelog
 
+## [2.1.66] - 2025-03-03
+- Fixed incorrect table name in settings.php template causing "Table does not exist" warning
+- Updated table name reference to use consistent 'aqm_formidable_spam_blocker_log' across all files
+
+## [2.1.65] - 2025-03-03
+- Fixed table creation functionality in direct-settings.php
+- Added fallback table creation mechanism for compatibility with various hosting environments
+- Enhanced error logging for table creation process
+- Fixed wrong table name in logs clearing functionality
+- Added fail-safe redirect mechanism with multiple fallbacks
+
 ## [2.1.64] - 2024-06-03
 - Enhanced geolocation detection to properly capture various region/state formats from different APIs
 - Fixed issue where region/state was showing as "Unknown" in logs

@@ -170,11 +170,11 @@ if ($wp_loaded) {
                 if (isset($_POST['redirect_to'])) {
                     $redirect_to = sanitize_text_field($_POST['redirect_to']);
                     write_log("Redirecting to: {$redirect_to}");
-                    wp_redirect($redirect_to);
+                    safe_redirect($redirect_to);
                     exit;
                 } else {
                     write_log("No redirect_to specified, using default");
-                    wp_redirect(admin_url('admin.php?page=ff-spam-blocker&settings-updated=true'));
+                    safe_redirect(admin_url('admin.php?page=ff-spam-blocker&settings-updated=true'));
                     exit;
                 }
             }
@@ -192,8 +192,44 @@ if ($wp_loaded) {
                 
                 // Create table function should be available from the main plugin file
                 if (function_exists('ffb_create_log_table')) {
-                    ffb_create_log_table();
-                    write_log("Table created successfully");
+                    write_log("Function ffb_create_log_table exists, attempting to create table");
+                    
+                    // Check if ABSPATH and wp-admin/includes/upgrade.php are available
+                    if (defined('ABSPATH')) {
+                        write_log("ABSPATH is defined: " . ABSPATH);
+                        
+                        // Check if upgrade.php exists
+                        $upgrade_path = ABSPATH . 'wp-admin/includes/upgrade.php';
+                        write_log("Checking for upgrade.php at: " . $upgrade_path);
+                        
+                        if (file_exists($upgrade_path)) {
+                            write_log("wp-admin/includes/upgrade.php exists");
+                        } else {
+                            write_log("ERROR: wp-admin/includes/upgrade.php not found!");
+                        }
+                    } else {
+                        write_log("ERROR: ABSPATH is not defined!");
+                    }
+                    
+                    // Add error handling around the table creation
+                    try {
+                        ffb_create_log_table();
+                        write_log("Table created successfully");
+                    } catch (Exception $e) {
+                        write_log("ERROR creating table: " . $e->getMessage());
+                        wp_die("Error creating table: " . $e->getMessage());
+                    }
+                    
+                    // Check if the table was actually created
+                    global $wpdb;
+                    $table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
+                    $table_exists = $wpdb->get_var("SHOW TABLES LIKE '$table_name'") === $table_name;
+                    
+                    if ($table_exists) {
+                        write_log("Table verified to exist: $table_name");
+                    } else {
+                        write_log("ERROR: Table $table_name does not exist after creation attempt!");
+                    }
                     
                     // Set transient to show success message
                     set_transient('ffb_table_created', true, 60);
@@ -203,16 +239,111 @@ if ($wp_loaded) {
                     if (isset($_POST['redirect_to'])) {
                         $redirect_to = sanitize_text_field($_POST['redirect_to']);
                         write_log("Redirecting to: {$redirect_to}");
-                        wp_redirect($redirect_to);
+                        safe_redirect($redirect_to);
                         exit;
                     } else {
                         write_log("No redirect_to specified for create table, using default");
-                        wp_redirect(admin_url('admin.php?page=ff-spam-blocker&table-created=true'));
+                        safe_redirect(admin_url('admin.php?page=ff-spam-blocker&table-created=true'));
                         exit;
                     }
                 } else {
-                    write_log("ffb_create_log_table function not found");
-                    wp_die(__('Error: Table creation function not found.'));
+                    write_log("ffb_create_log_table function not found, using fallback");
+                    
+                    // Define the create table function here as a fallback
+                    if (!function_exists('ffb_create_log_table')) {
+                        function ffb_create_log_table() {
+                            global $wpdb;
+                            $table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
+                            
+                            write_log("Defining fallback ffb_create_log_table function");
+                            
+                            // Check if the table already exists
+                            if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") === $table_name) {
+                                write_log("Table already exists, dropping it for recreation");
+                                $wpdb->query("DROP TABLE IF EXISTS $table_name");
+                            }
+                            
+                            // Create the table
+                            $charset_collate = $wpdb->get_charset_collate();
+                            
+                            $sql = "CREATE TABLE $table_name (
+                                id mediumint(9) NOT NULL AUTO_INCREMENT,
+                                timestamp datetime DEFAULT '0000-00-00 00:00:00' NOT NULL,
+                                ip_address varchar(45) NOT NULL,
+                                country_code varchar(10),
+                                country varchar(100),
+                                region_name varchar(100),
+                                region varchar(100),
+                                city varchar(100),
+                                zip varchar(20),
+                                status varchar(20),
+                                reason text,
+                                form_id varchar(20),
+                                log_type varchar(20) DEFAULT 'form_load',
+                                geo_data text,
+                                PRIMARY KEY  (id),
+                                KEY ip_address (ip_address),
+                                KEY status (status),
+                                KEY log_type (log_type)
+                            ) $charset_collate;";
+                            
+                            write_log("About to run SQL: " . $sql);
+                            
+                            // Make sure upgrade.php is included
+                            if (!function_exists('dbDelta')) {
+                                if (file_exists(ABSPATH . 'wp-admin/includes/upgrade.php')) {
+                                    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+                                    write_log("Successfully included wp-admin/includes/upgrade.php");
+                                } else {
+                                    write_log("ERROR: Could not find wp-admin/includes/upgrade.php");
+                                    throw new Exception("Could not find wp-admin/includes/upgrade.php");
+                                }
+                            }
+                            
+                            // Run dbDelta
+                            try {
+                                dbDelta($sql);
+                                write_log("dbDelta executed successfully");
+                            } catch (Exception $e) {
+                                write_log("ERROR in dbDelta: " . $e->getMessage());
+                                throw $e;
+                            }
+                            
+                            // Update the DB version option to track that we've created the table
+                            update_option('ffb_db_version', '2.1.64');
+                            write_log("Updated ffb_db_version option to 2.1.64");
+                        }
+                    }
+                    
+                    // Call the fallback function
+                    ffb_create_log_table();
+                    
+                    // Check if the table was actually created
+                    global $wpdb;
+                    $table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
+                    $table_exists = $wpdb->get_var("SHOW TABLES LIKE '$table_name'") === $table_name;
+                    
+                    if ($table_exists) {
+                        write_log("Table verified to exist: $table_name");
+                    } else {
+                        write_log("ERROR: Table $table_name does not exist after creation attempt!");
+                    }
+                    
+                    // Set transient to show success message
+                    set_transient('ffb_table_created', true, 60);
+                    write_log("Transient set for table created message");
+                    
+                    // Redirect back to settings page
+                    if (isset($_POST['redirect_to'])) {
+                        $redirect_to = sanitize_text_field($_POST['redirect_to']);
+                        write_log("Redirecting to: {$redirect_to}");
+                        safe_redirect($redirect_to);
+                        exit;
+                    } else {
+                        write_log("No redirect_to specified for create table, using default");
+                        safe_redirect(admin_url('admin.php?page=ff-spam-blocker&table-created=true'));
+                        exit;
+                    }
                 }
             }
             // Handle clear logs action
@@ -228,7 +359,7 @@ if ($wp_loaded) {
                 write_log("Nonce verified for clear logs");
                 
                 global $wpdb;
-                $table_name = $wpdb->prefix . 'formidable_forms_blocker_log';
+                $table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
                 write_log("Clearing logs from table: {$table_name}");
                 
                 $result = $wpdb->query("TRUNCATE TABLE {$table_name}");
@@ -239,11 +370,11 @@ if ($wp_loaded) {
                     if (isset($_POST['redirect_to'])) {
                         $redirect_to = sanitize_text_field($_POST['redirect_to']);
                         write_log("Redirecting to: {$redirect_to}");
-                        wp_redirect($redirect_to);
+                        safe_redirect($redirect_to);
                         exit;
                     } else {
                         write_log("No redirect_to specified for clear logs, using default");
-                        wp_redirect(admin_url('admin.php?page=ff-spam-blocker&logs-cleared=true'));
+                        safe_redirect(admin_url('admin.php?page=ff-spam-blocker&logs-cleared=true'));
                         exit;
                     }
                 } else {
@@ -253,13 +384,13 @@ if ($wp_loaded) {
             }
             else {
                 write_log("Unknown action or no action specified in POST request");
-                wp_redirect(admin_url('admin.php?page=ff-spam-blocker&error=unknown_action'));
+                safe_redirect(admin_url('admin.php?page=ff-spam-blocker&error=unknown_action'));
                 exit;
             }
         } else {
             // Not a POST request, redirect to admin page
             write_log("Not a POST request, redirecting to admin page");
-            wp_redirect(admin_url('admin.php?page=ff-spam-blocker'));
+            safe_redirect(admin_url('admin.php?page=ff-spam-blocker'));
             exit;
         }
         
@@ -270,4 +401,23 @@ if ($wp_loaded) {
 } else {
     write_log("WordPress could not be loaded from any of the attempted paths");
     die("WordPress wp-load.php not found. This script must be placed in the WordPress plugins directory.");
+}
+
+// Function to redirect back to the settings page with better error handling
+function safe_redirect($url) {
+    write_log("Attempting to redirect to: " . $url);
+    
+    // Try WordPress redirect function if available
+    if (function_exists('wp_redirect')) {
+        write_log("Using wp_redirect");
+        wp_redirect($url);
+        exit;
+    }
+    
+    // If headers already sent or wp_redirect not available, use JavaScript
+    write_log("Fallback to JavaScript redirect");
+    echo '<script type="text/javascript">window.location.href = "' . esc_js($url) . '";</script>';
+    echo '<noscript><meta http-equiv="refresh" content="0;url=' . esc_url($url) . '"></noscript>';
+    echo '<p>If you are not redirected automatically, please <a href="' . esc_url($url) . '">click here</a>.</p>';
+    exit;
 }
