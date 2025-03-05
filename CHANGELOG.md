@@ -1,5 +1,100 @@
 # AQM Formidable Forms Spam Blocker Changelog
 
+## [2.1.83] - 2025-03-04
+* Fixed fatal error in direct-settings.php by completely rewriting the WordPress loading mechanism
+* Replaced file-based logging with WordPress error_log for improved reliability
+* Added better detection of WordPress environment when included from main plugin file
+
+## [2.1.82] - 2025-03-04
+* Fixed fatal error in direct-settings.php by improving the write_log function to handle empty file paths
+* Added checks to only initialize logging when direct-settings.php is accessed directly
+
+## [2.1.81] - 2025-03-04
+* Fixed fatal error by modifying register_assets() to always enqueue scripts without conditional checks
+
+## [2.1.80] - 2025-03-04
+* Fixed method visibility issue by changing is_form_page() from private to public
+
+## [2.1.79] - 2025-03-04
+* Fixed fatal error by restoring the missing is_form_page() method
+* Fixed duplicate function declaration of ffb_create_log_table()
+* Improved plugin structure by including direct-settings.php for shared functions
+
+## [2.1.78] - 2025-03-04
+* Fixed redirect issues by improving the safe_redirect function with proper wp_safe_redirect implementation
+* Enhanced geolocation data handling to ensure country and region information is always displayed in access logs
+* Improved log_access_attempt function to better handle different API response formats for country/region data
+* Added comprehensive debug logging for geolocation data processing
+
+## [2.1.77] - 2025-03-04
+* Added missing `get_blocked_message()` function to fix PHP fatal error
+* Improved the access log table by removing the ID column per user request
+* Enhanced country and region data collection from API response for better logs
+* Fixed issue with states still appearing when removed from approved states list
+* Added comprehensive cache clearing for geolocation data when settings are updated
+* Made improvements to direct AJAX location checks to bypass cache
+
+## [2.1.76] - 2025-03-04
+* Fixed issue with missing Country and Region values in logs by improving geolocation data processing
+* Enhanced region_code and region_name handling to properly display in logs
+
+## [2.1.75] - 2025-03-04
+* Fixed issue with form visibility when state is removed from approved list
+* Added better cache handling to refresh geolocation data
+* Added debugging info to track down caching issues
+* Updated geo-blocker.js to use the latest approved states list
+
+## [2.1.74] - 2025-03-04
+* Fixed issue with form submission issue where settings were lost due to nested forms
+* Resolved form conflict by moving create table form outside main settings form
+
+## [2.1.73] - 2025-03-04
+- Fixed PHP warning about accessing version property on null in ffb_handle_db_migration function
+- Added null check for global $formidable_forms_blocker in database migration function
+- Removed duplicate function definition that was causing issues
+
+## [2.1.72] - 2025-03-04
+- Fixed missing closing brace in handle_save_settings function
+- Modified is_form_page function to accept optional content parameter
+- Added fallback to get content from global post object when no content is provided
+- Improved logging for form detection on various page types
+
+## [2.1.71] - 2025-03-05
+- Added AJAX-based location checking functionality to overcome issues with CDN and caching plugins
+- Added JavaScript functionality to replace forms dynamically based on location checking
+- Improved form detection for mobile devices and cached pages
+- Fixed geolocation detection and validation for various API response formats
+- Fixed region code and ZIP code verification to be more flexible
+- Added comprehensive logging for troubleshooting form display issues
+- Fixed slashes being added to blocked message when displayed
+
+## [2.1.70] - 2025-03-03
+- Fixed country_name and region_name fields in database schema
+- Updated log_access_attempt function to correctly store ipapi.com response data
+- Ensured country_name, country_code, region_name, and region_code are properly saved and displayed
+- Added improved debugging for geolocation data extraction
+- Fixed consistency between database field names and API response field names
+
+## [2.1.69] - 2025-03-04
+- Fixed Country and Region data display in logs table to show correct values
+- Added debug logging for troubleshooting geolocation data
+
+## [2.1.68] - 2025-03-04
+- Fixed CSV export functionality by properly integrating export handler into the class
+- Removed standalone export function to eliminate redundancy
+- Ensured proper hook registration for the export feature
+- Added Country and Region columns to the logs page table
+- Improved logs page table headers to match CSV export column names
+- Enhanced CSV export with consistent column headers
+- Added Form ID and Log Type columns to logs page for better tracking
+
+## [2.1.67] - 2025-03-03
+- Added CSV export functionality for access logs
+- CSV exports preserve current filter settings
+- Includes UTF-8 BOM for Excel compatibility
+- Added export button to access logs interface
+- Enhanced API usage tracking across sites
+
 ## [2.1.66] - 2025-03-03
 - Fixed incorrect table name in settings.php template causing "Table does not exist" warning
 - Updated table name reference to use consistent 'aqm_formidable_spam_blocker_log' across all files
@@ -593,14 +688,15 @@
 - Enhanced error logging with more detailed API request information
 
 ## [1.6.9] - February 26, 2025
-- Enhanced API error handling and logging
-- Improved API key validation with detailed error messages
-- Updated geolocation data caching to use transients
-- Added comprehensive API response testing and diagnostics
-- Fixed issues with API usage limits detection
-- Added fallback behavior when API limits are reached
+### Fixed
+- Fixed API endpoint URL format to match ipapi.com documentation
+- Updated client-side geolocation to use correct API endpoint format
+- Added IP address detection using ipify.org for client-side validation
+- Improved API response handling for both server and client sides
+- Enhanced error logging with more detailed API request information
 
 ## [1.6.8] - February 26, 2025
+### Fixed
 - Fixed state validation to handle both `region` and `region_code` fields from the API
 - Added API response format testing tool in admin panel
 - Improved error handling and debugging for geolocation checks

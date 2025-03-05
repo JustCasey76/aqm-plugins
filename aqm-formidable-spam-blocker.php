@@ -2,10 +2,11 @@
 /**
  * Plugin Name: AQM Formidable Forms Spam Blocker
  * Plugin URI: https://aqmarketing.com
- * Description: Block form submissions based on IP geolocation and other criteria.
- * Version: 2.1.66
- * Author: AQ Marketing
+ * Description: Blocks spam submissions in Formidable Forms based on IP geolocation and other factors.
+ * Version: 2.1.83
+ * Author: AQMarketing
  * Author URI: https://aqmarketing.com
+ * License: GPL3
  * Text Domain: aqm-formidable-spam-blocker
  */
 
@@ -40,7 +41,7 @@ class FormidableFormsBlocker {
     private $rate_limit_requests = 3; // Max requests per IP in timeframe
     private $blocked_ips = array(); // IPs to block for testing
     private $log_enabled = true; // Whether to log access attempts
-    private $version = '2.1.66';
+    private $version = '2.1.83';
     private $geo_data = null;
     private $is_blocked = null;
     private $blocked_message = ''; // Blocked message
@@ -48,17 +49,45 @@ class FormidableFormsBlocker {
 
     public function __construct() {
         // Set version
-        $this->version = '2.1.66';
+        $this->version = '2.1.83';
         
         // Initialize properties
         $this->init_properties();
         
         // Add hooks
         $this->add_hooks();
+    }
+    
+    /**
+     * Initialize hooks
+     */
+    private function init_hooks() {
+        // Add a unique action for the plugin to allow it to be called without
+        // conflicting with other plugins
+        add_action('plugins_loaded', array($this, 'plugins_loaded'));
         
-        // Register AJAX endpoints
-        add_action('wp_ajax_ffb_get_approved_states', array($this, 'ajax_get_approved_states'));
-        add_action('wp_ajax_nopriv_ffb_get_approved_states', array($this, 'ajax_get_approved_states'));
+        // Add admin menu items
+        add_action('admin_menu', array($this, 'add_admin_menu'));
+        
+        // Add settings link to plugins page
+        add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'add_settings_link'));
+        
+        // Register scripts
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
+        add_action('admin_enqueue_scripts', array($this, 'admin_scripts'));
+        
+        // Add callbacks for AJAX
+        add_action('wp_ajax_ffb_test_api', array($this, 'test_api'));
+        add_action('wp_ajax_nopriv_ffb_test_api', array($this, 'test_api'));
+        add_action('wp_ajax_ffb_get_usage', array($this, 'get_api_usage'));
+        add_action('wp_ajax_ffb_search_ip', array($this, 'search_ip_cache'));
+        add_action('wp_ajax_ffb_clear_cache', array($this, 'clear_geolocation_cache'));
+        add_action('wp_ajax_ffb_export_logs_csv', array($this, 'handle_export_logs_csv'));
+        add_action('wp_ajax_ffb_check_location', array($this, 'ajax_check_location'));
+        add_action('wp_ajax_nopriv_ffb_check_location', array($this, 'ajax_check_location'));
+        
+        // Add handlers for form submission
+        add_action('admin_post_ffb_save_settings', array($this, 'handle_save_settings'));
     }
 
     private function init_properties() {
@@ -84,7 +113,7 @@ class FormidableFormsBlocker {
         $this->approved_zip_codes = is_array($approved_zip_codes) ? $approved_zip_codes : array();
         
         // Load blocked message
-        $this->blocked_message = get_option('ffb_blocked_message', 'We apologize, but forms are not available in your location.');
+        $this->blocked_message = stripslashes(get_option('ffb_blocked_message', 'We apologize, but forms are not available in your location.'));
         
         // Load rate limiting settings
         $this->rate_limit_enabled = get_option('ffb_rate_limit_enabled', '1') === '1';
@@ -114,65 +143,115 @@ class FormidableFormsBlocker {
      * Initialize the plugin
      */
     public function init() {
-        // Create database table if it doesn't exist
-        if (function_exists('ffb_create_log_table')) {
-            ffb_create_log_table();
+        // Initialize properties
+        $this->init_properties();
+        
+        // Cache-busting notice
+        if (is_admin()) {
+            add_action('admin_notices', array($this, 'display_cache_notice'));
         }
+        
+        // Add JavaScript for location checking
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
+        
+        // Admin page
+        add_action('admin_menu', array($this, 'add_admin_menu'));
+        
+        // Listen for AJAX submissions
+        add_action('wp_ajax_ffb_log_form_submit', array($this, 'ajax_log_form_submit'));
+        add_action('wp_ajax_nopriv_ffb_log_form_submit', array($this, 'ajax_log_form_submit'));
+        
+        // Formidable Forms integration
+        add_filter('frm_validate_entry', array($this, 'validate_form_submission'), 20, 2);
         
         // Register shortcodes
-        add_shortcode('ffb_check_location', array($this, 'shortcode_check_location'));
+        add_shortcode('ffb_location_check', array($this, 'location_check_shortcode'));
+        add_shortcode('ffb_access_log', array($this, 'access_log_shortcode'));
         
-        // Check if we need to hook into Formidable Forms
-        if (class_exists('FrmHooksController')) {
-            // Add hooks for Formidable Forms
-            add_filter('frm_validate_entry', array($this, 'validate_submission'), 10, 2);
-            add_filter('frm_pre_create_entry', array($this, 'pre_create_entry'), 10, 2);
-        }
+        // Filter content (with caching precautions)
+        add_filter('the_content', array($this, 'block_form'), 99);
+        
+        // Add AJAX endpoint for dynamic form visibility checking (CDN/cache compatible)
+        add_action('wp_ajax_ffb_check_location', array($this, 'ajax_check_location'));
+        add_action('wp_ajax_nopriv_ffb_check_location', array($this, 'ajax_check_location'));
+        
+        // Register assets for dynamic location checking
+        add_action('wp_enqueue_scripts', array($this, 'register_assets'));
+        add_action('admin_enqueue_scripts', array($this, 'register_admin_assets'));
     }
     
     /**
-     * Create the access log table if it doesn't exist
+     * Register frontend assets
      */
-    private function create_table() {
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
+    public function register_assets() {
+        // Register frontend script but only enqueue it conditionally
+        wp_register_script('ffb-frontend', plugins_url('js/ffb-frontend.js', __FILE__), array('jquery'), $this->version, true);
         
-        // Check if table exists
-        if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") === $table_name) {
-            // Table already exists
+        // Always enqueue the script to avoid fatal errors
+        wp_enqueue_script('ffb-frontend');
+        
+        // Localize frontend script with data
+        wp_localize_script('ffb-frontend', 'ffbFrontendData', array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('ffb_check_location'),
+            'hasForm' => '1'
+        ));
+        
+        error_log('FFB Debug: Frontend script enqueued');
+    }
+    
+    /**
+     * Register admin assets
+     */
+    public function register_admin_assets() {
+        // Only load on our plugin pages
+        $screen = get_current_screen();
+        if (!$screen || strpos($screen->id, 'ffb') === false) {
             return;
         }
         
-        // Create the table
-        $charset_collate = $wpdb->get_charset_collate();
-            
-        $sql = "CREATE TABLE $table_name (
-            id mediumint(9) NOT NULL AUTO_INCREMENT,
-            timestamp datetime DEFAULT '0000-00-00 00:00:00' NOT NULL,
-            ip_address varchar(45) NOT NULL,
-            country_code varchar(10),
-            country varchar(100),
-            region_name varchar(100),
-            region varchar(100),
-            city varchar(100),
-            zip varchar(20),
-            status varchar(20),
-            reason text,
-            form_id varchar(20),
-            log_type varchar(20) DEFAULT 'form_load',
-            geo_data text,
-            PRIMARY KEY  (id),
-            KEY ip_address (ip_address),
-            KEY status (status),
-            KEY log_type (log_type)
-        ) $charset_collate;";
-            
-        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
-        dbDelta($sql);
-            
-        // Update the DB version option to track that we've created the table
-        update_option('ffb_db_version', $this->version);
-        error_log('FFB Debug: Created access log table');
+        // Register and enqueue admin script
+        wp_register_script('ffb-admin', plugins_url('js/ffb-admin.js', __FILE__), array('jquery'), $this->version, true);
+        wp_enqueue_script('ffb-admin');
+        
+        // Localize admin script with data
+        wp_localize_script('ffb-admin', 'ffbAdminData', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('ffb_admin_nonce')
+        ));
+    }
+    
+    /**
+     * Display cache notice
+     */
+    public function display_cache_notice() {
+        // Only show in admin area
+        if (!is_admin()) {
+            return;
+        }
+        
+        // Only show to users who can manage options
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+        
+        // Check if caching plugins are active
+        $caching_plugins = array('wp-rocket/wp-rocket.php', 'w3-total-cache/w3-total-cache.php', 'wp-super-cache/wp-cache.php');
+        $active_caching_plugins = array();
+        foreach ($caching_plugins as $plugin) {
+            if (is_plugin_active($plugin)) {
+                $active_caching_plugins[] = $plugin;
+            }
+        }
+        
+        // If no caching plugins are active, don't show notice
+        if (empty($active_caching_plugins)) {
+            return;
+        }
+        
+        // Display notice
+        $message = 'You are using caching plugins that may interfere with the proper functioning of this plugin. Please ensure you have configured the caching plugins to exclude the <code>ffb_check_location</code> AJAX endpoint.';
+        echo '<div class="notice notice-warning is-dismissible"><p>' . $message . '</p></div>';
     }
 
     public function add_admin_menu() {
@@ -211,10 +290,13 @@ class FormidableFormsBlocker {
         add_action('admin_post_ffb_update_api_key', array($this, 'update_api_key'));
         
         // Add action to handle clearing the access log
-        add_action('admin_post_ffb_clear_access_log', array($this, 'clear_access_log'));
+        add_action('admin_post_ffb_clear_access_log', array($this, 'handle_clear_logs'));
         
         // Add action to manually create/recreate the access log table
         add_action('admin_post_ffb_create_table', array($this, 'manual_create_table'));
+        
+        // Add action to handle exporting logs to CSV
+        add_action('admin_post_ffb_export_logs_csv', array($this, 'handle_export_logs_csv'));
     }
     
     /**
@@ -257,18 +339,54 @@ class FormidableFormsBlocker {
         <div class="wrap">
             <h1>Access Logs</h1>
             
-            <!-- Clear Logs Button -->
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-bottom: 20px;">
-                <?php wp_nonce_field('ffb_clear_logs', 'ffb_clear_logs_nonce'); ?>
-                <input type="hidden" name="action" value="ffb_clear_access_log">
-                <input type="hidden" name="redirect_to" value="<?php echo esc_url(admin_url('admin.php?page=ff-spam-blocker-logs')); ?>">
-                <?php submit_button('Clear Access Logs', 'delete', 'submit', false, array(
-                    'onclick' => 'return confirm("Are you sure you want to clear all access logs? This action cannot be undone.");'
-                )); ?>
-            </form>
-            
-            <!-- Insert Test Record Link -->
-            <a href="<?php echo add_query_arg('ffb_insert_test', '1', admin_url('admin.php?page=ff-spam-blocker-logs')); ?>" class="button">Insert Test Record</a>
+            <div class="ffb-admin-actions" style="margin-bottom: 20px; display: flex; gap: 10px;">
+                <!-- Clear Logs Button -->
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                    <?php wp_nonce_field('ffb_clear_logs', 'ffb_clear_logs_nonce'); ?>
+                    <input type="hidden" name="action" value="ffb_clear_access_log">
+                    <input type="hidden" name="redirect_to" value="<?php echo esc_url(admin_url('admin.php?page=ff-spam-blocker-logs')); ?>">
+                    <?php submit_button('Clear Access Logs', 'delete', 'submit', false, array(
+                        'onclick' => 'return confirm("Are you sure you want to clear all access logs? This action cannot be undone.");'
+                    )); ?>
+                </form>
+                
+                <!-- Export to CSV Button -->
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                    <?php wp_nonce_field('ffb_export_logs', 'ffb_export_logs_nonce'); ?>
+                    <input type="hidden" name="action" value="ffb_export_logs_csv">
+                    
+                    <!-- Pass any active filters to the export -->
+                    <?php if (!empty($_GET['start_date'])): ?>
+                        <input type="hidden" name="start_date" value="<?php echo esc_attr($_GET['start_date']); ?>">
+                    <?php endif; ?>
+                    
+                    <?php if (!empty($_GET['end_date'])): ?>
+                        <input type="hidden" name="end_date" value="<?php echo esc_attr($_GET['end_date']); ?>">
+                    <?php endif; ?>
+                    
+                    <?php if (!empty($_GET['ip_address'])): ?>
+                        <input type="hidden" name="ip_address" value="<?php echo esc_attr($_GET['ip_address']); ?>">
+                    <?php endif; ?>
+                    
+                    <?php if (!empty($_GET['country'])): ?>
+                        <input type="hidden" name="country" value="<?php echo esc_attr($_GET['country']); ?>">
+                    <?php endif; ?>
+                    
+                    <?php if (!empty($_GET['region'])): ?>
+                        <input type="hidden" name="region" value="<?php echo esc_attr($_GET['region']); ?>">
+                    <?php endif; ?>
+                    
+                    <?php if (!empty($_GET['status'])): ?>
+                        <input type="hidden" name="status" value="<?php echo esc_attr($_GET['status']); ?>">
+                    <?php endif; ?>
+                    
+                    <?php if (!empty($_GET['message'])): ?>
+                        <input type="hidden" name="message" value="<?php echo esc_attr($_GET['message']); ?>">
+                    <?php endif; ?>
+                    
+                    <input type="submit" class="button" value="Export to CSV">
+                </form>
+            </div>
 
             <?php $this->display_access_logs(); ?>
         </div>
@@ -283,7 +401,7 @@ class FormidableFormsBlocker {
         
         // Check if table exists
         if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") !== $table_name) {
-            echo '<div class="notice notice-error"><p>Access log table does not exist. Please recreate the table.</p></div>';
+            echo '<div class="notice notice-error"><p>' . __('Access log table does not exist. Try deactivating and reactivating the plugin.', 'aqm-formidable-spam-blocker') . '</p></div>';
             return;
         }
         
@@ -319,14 +437,16 @@ class FormidableFormsBlocker {
         
         // Country filter
         if (!empty($_GET['country']) && in_array('country_code', $column_names)) {
-            $where_clauses[] = "country_code = %s";
-            $query_args[] = $_GET['country'];
+            $where_clauses[] = "(country_code LIKE %s OR country_name LIKE %s)";
+            $query_args[] = '%' . $wpdb->esc_like($_GET['country']) . '%';
+            $query_args[] = '%' . $wpdb->esc_like($_GET['country']) . '%';
         }
         
         // Region filter
         if (!empty($_GET['region']) && in_array('region_name', $column_names)) {
-            $where_clauses[] = "region_name = %s";
-            $query_args[] = $_GET['region'];
+            $where_clauses[] = "(region_code LIKE %s OR region_name LIKE %s)";
+            $query_args[] = '%' . $wpdb->esc_like($_GET['region']) . '%';
+            $query_args[] = '%' . $wpdb->esc_like($_GET['region']) . '%';
         }
         
         // Status filter
@@ -379,6 +499,11 @@ class FormidableFormsBlocker {
         if (empty($results)) {
             echo '<div class="notice notice-info"><p>No access logs found matching your filters. Try adjusting your search criteria.</p></div>';
             return;
+        }
+
+        // Debug the first result to see what data we have
+        if (!empty($results)) {
+            error_log('FFB Debug: First result data: ' . print_r($results[0], true));
         }
 
         // Display filter form
@@ -450,26 +575,132 @@ class FormidableFormsBlocker {
             </div>
         </form>
 
+        <div class="ffb-actions" style="margin: 15px 0;">
+            <!-- Clear logs button -->
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display: inline-block;">
+                <?php wp_nonce_field('ffb_clear_log', 'ffb_clear_log_nonce'); ?>
+                <input type="hidden" name="action" value="ffb_clear_access_log">
+                
+                <input type="submit" class="button" value="Clear All Logs" onclick="return confirm('Are you sure you want to clear all logs? This action cannot be undone.');">
+            </form>
+            
+            <!-- Export to CSV button -->
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display: inline-block; margin-left: 10px;">
+                <?php wp_nonce_field('ffb_export_logs', 'ffb_export_logs_nonce'); ?>
+                <input type="hidden" name="action" value="ffb_export_logs_csv">
+                
+                <!-- Pass current filters to the export -->
+                <?php if (!empty($_GET['start_date'])): ?>
+                    <input type="hidden" name="start_date" value="<?php echo esc_attr($_GET['start_date']); ?>">
+                <?php endif; ?>
+                
+                <?php if (!empty($_GET['end_date'])): ?>
+                    <input type="hidden" name="end_date" value="<?php echo esc_attr($_GET['end_date']); ?>">
+                <?php endif; ?>
+                
+                <?php if (!empty($_GET['ip_address'])): ?>
+                    <input type="hidden" name="ip_address" value="<?php echo esc_attr($_GET['ip_address']); ?>">
+                <?php endif; ?>
+                
+                <?php if (!empty($_GET['country'])): ?>
+                    <input type="hidden" name="country" value="<?php echo esc_attr($_GET['country']); ?>">
+                <?php endif; ?>
+                
+                <?php if (!empty($_GET['region'])): ?>
+                    <input type="hidden" name="region" value="<?php echo esc_attr($_GET['region']); ?>">
+                <?php endif; ?>
+                
+                <?php if (!empty($_GET['status'])): ?>
+                    <input type="hidden" name="status" value="<?php echo esc_attr($_GET['status']); ?>">
+                <?php endif; ?>
+                
+                <?php if (!empty($_GET['message'])): ?>
+                    <input type="hidden" name="message" value="<?php echo esc_attr($_GET['message']); ?>">
+                <?php endif; ?>
+                
+                <input type="submit" class="button button-primary" value="Export to CSV">
+            </form>
+        </div>
+
         <table class="widefat fixed striped">
             <thead>
                 <tr>
                     <th>Timestamp</th>
                     <th>IP Address</th>
                     <th>Country</th>
-                    <th>State</th>
+                    <th>Region</th>
                     <th>Status</th>
                     <th>Reason</th>
+                    <th>Form ID</th>
+                    <th>Log Type</th>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($results as $log): ?>
+                <?php foreach ($results as $log): 
+                    // Try to get geo data if it exists
+                    $geo_data = [];
+                    if (isset($log->geo_data) && !empty($log->geo_data)) {
+                        $geo_data = json_decode($log->geo_data, true);
+                        error_log('FFB Debug: Decoded geo_data for log ID ' . $log->id . ': ' . print_r($geo_data, true));
+                    }
+                    
+                    // Get country from different possible sources
+                    $country = '';
+                    if (isset($log->country_name) && !empty($log->country_name) && $log->country_name !== 'Unknown') {
+                        $country = $log->country_name;
+                        error_log('FFB Debug: Using country_name from log: ' . $country);
+                    } elseif (isset($geo_data['country_name']) && !empty($geo_data['country_name'])) {
+                        $country = $geo_data['country_name'];
+                        error_log('FFB Debug: Using country_name from geo_data: ' . $country);
+                    } elseif (isset($geo_data['country']) && !empty($geo_data['country'])) {
+                        $country = $geo_data['country'];
+                        error_log('FFB Debug: Using country from geo_data: ' . $country);
+                    }
+                    
+                    // Get region from different possible sources
+                    $region = '';
+                    if (isset($log->region_name) && !empty($log->region_name) && $log->region_name !== 'Unknown') {
+                        $region = $log->region_name;
+                        error_log('FFB Debug: Using region_name from log: ' . $region);
+                    } elseif (isset($geo_data['region_name']) && !empty($geo_data['region_name'])) {
+                        $region = $geo_data['region_name'];
+                        error_log('FFB Debug: Using region_name from geo_data: ' . $region);
+                    } elseif (isset($geo_data['region_code']) && !empty($geo_data['region_code'])) {
+                        $region = $geo_data['region_code'];
+                        error_log('FFB Debug: Using region_code from geo_data: ' . $region);
+                    } elseif (isset($geo_data['region']) && !empty($geo_data['region'])) {
+                        $region = $geo_data['region'];
+                        error_log('FFB Debug: Using region from geo_data: ' . $region);
+                    } elseif (isset($geo_data['regionName']) && !empty($geo_data['regionName'])) {
+                        $region = $geo_data['regionName'];
+                        error_log('FFB Debug: Using regionName from geo_data: ' . $region);
+                    } elseif (isset($geo_data['regionCode']) && !empty($geo_data['regionCode'])) {
+                        $region = $geo_data['regionCode'];
+                        error_log('FFB Debug: Using regionCode from geo_data: ' . $region);
+                    } elseif (isset($geo_data['state']) && !empty($geo_data['state'])) {
+                        $region = $geo_data['state'];
+                        error_log('FFB Debug: Using state from geo_data: ' . $region);
+                    } elseif (isset($geo_data['subdivision_1_name']) && !empty($geo_data['subdivision_1_name'])) {
+                        $region = $geo_data['subdivision_1_name'];
+                        error_log('FFB Debug: Using subdivision_1_name from geo_data: ' . $region);
+                    } elseif (isset($geo_data['subdivision_1_code']) && !empty($geo_data['subdivision_1_code'])) {
+                        $region = $geo_data['subdivision_1_code'];
+                        error_log('FFB Debug: Using subdivision_1_code from geo_data: ' . $region);
+                    }
+                    
+                    // Convert to strings to ensure proper display
+                    $country = (string)$country;
+                    $region = (string)$region;
+                ?>
                     <tr>
                         <td><?php echo esc_html(date('Y-m-d H:i:s', strtotime($log->timestamp))); ?></td>
                         <td><?php echo esc_html($log->ip_address); ?></td>
-                        <td><?php echo isset($log->country_code) ? esc_html($log->country_code) : ''; ?></td>
-                        <td><?php echo isset($log->region_name) ? esc_html($log->region_name) : ''; ?></td>
+                        <td><?php echo esc_html($country); ?></td>
+                        <td><?php echo esc_html($region); ?></td>
                         <td><?php echo isset($log->status) ? esc_html($log->status) : ''; ?></td>
                         <td><?php echo isset($log->reason) ? esc_html($log->reason) : ''; ?></td>
+                        <td><?php echo isset($log->form_id) ? esc_html($log->form_id) : ''; ?></td>
+                        <td><?php echo isset($log->log_type) ? esc_html($log->log_type) : 'form_load'; ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -649,6 +880,30 @@ class FormidableFormsBlocker {
         if (is_array($data)) {
             error_log('FFB Debug: API response array keys: ' . implode(', ', array_keys($data)));
             
+            // Ensure we have region and country data
+            // ipapi.com uses region_name and country_name, make sure they're set
+            if (isset($data['region_code']) && !isset($data['region_name'])) {
+                $data['region_name'] = $data['region_code'];
+                error_log('FFB Debug: Set region_name from region_code: ' . $data['region_name']);
+            }
+            
+            if (isset($data['region']) && !isset($data['region_name']) && !isset($data['region_code'])) {
+                $data['region_name'] = $data['region'];
+                $data['region_code'] = $data['region'];
+                error_log('FFB Debug: Set region_name and region_code from region: ' . $data['region']);
+            }
+            
+            if (isset($data['country_code']) && !isset($data['country_name'])) {
+                $data['country_name'] = $data['country_code'];
+                error_log('FFB Debug: Set country_name from country_code: ' . $data['country_name']);
+            }
+            
+            if (isset($data['country']) && !isset($data['country_name']) && !isset($data['country_code'])) {
+                $data['country_name'] = $data['country'];
+                $data['country_code'] = $data['country'];
+                error_log('FFB Debug: Set country_name and country_code from country: ' . $data['country']);
+            }
+            
             // Log region-specific keys if they exist
             if (isset($data['region_name'])) {
                 error_log('FFB Debug: Found region_name: ' . $data['region_name']);
@@ -807,7 +1062,7 @@ class FormidableFormsBlocker {
             // If in US, check state
             if (isset($geo_data['country_code']) && strtoupper($geo_data['country_code']) == 'US' && !empty($geo_data['region_code'])) {
                 $region_code = strtoupper($geo_data['region_code']);
-                $approved_states_upper = array_map('strtoupper', $this->approved_states);
+                $approved_states_upper = array_map('strtoupper', $this->get_approved_states());
                 
                 error_log('FFB Debug: Checking state: ' . $region_code . ' against approved states: ' . implode(',', $approved_states_upper));
                 
@@ -862,15 +1117,26 @@ class FormidableFormsBlocker {
     }
 
     public function replace_forms_with_message($content, $message) {
+        error_log('FFB Debug: Replacing forms with message');
+        
         // Replace Formidable Forms shortcodes with message
         $pattern = '/\[formidable.*?\]/';
         $replacement = '<div class="ffb-blocked-message">' . $message . '</div>';
         $content = preg_replace($pattern, $replacement, $content);
         
-        // Also handle Formidable Forms rendered via HTML - only target the form element, not its container
-        $form_pattern = '/<form.*?class=".*?frm_pro_form.*?>.*?<\/form>/s';
+        // Also handle Formidable Forms rendered via HTML - form element with frm_pro_form class
+        $form_pattern = '/<form[^>]*class="[^"]*frm[_-]pro[_-]form[^"]*".*?>.*?<\/form>/s';
         $content = preg_replace($form_pattern, $replacement, $content);
         
+        // Handle forms with other frm classes (needed for mobile)
+        $form_pattern2 = '/<form[^>]*class="[^"]*frm[_-].*?".*?>.*?<\/form>/s';
+        $content = preg_replace($form_pattern2, $replacement, $content);
+        
+        // Handle div container with frm_forms class
+        $div_pattern = '/<div[^>]*class="[^"]*frm_forms.*?".*?>.*?<form.*?>.*?<\/form>.*?<\/div>/s';
+        $content = preg_replace($div_pattern, $replacement, $content);
+        
+        error_log('FFB Debug: Form replacement complete');
         return $content;
     }
 
@@ -930,11 +1196,11 @@ class FormidableFormsBlocker {
         wp_enqueue_script('jquery');
         
         // Enqueue the geo-blocker script with cache busting
-        $js_version = '2.1.66-' . time(); // Add timestamp for cache busting
+        $js_version = '2.1.83-' . time(); // Add timestamp for cache busting
         wp_enqueue_script('ffb-geo-blocker', plugin_dir_url(__FILE__) . 'geo-blocker.js', array('jquery'), $js_version, true);
         
         // Enqueue the styles
-        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', array(), '2.1.66');
+        wp_enqueue_style('ffb-styles', plugin_dir_url(__FILE__) . 'style.css', array(), '2.1.83');
         
         // Add honeypot CSS
         $honeypot_css = "
@@ -1011,10 +1277,10 @@ class FormidableFormsBlocker {
         wp_enqueue_style('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css', array(), '4.1.0');
         
         // Enqueue our admin script
-        wp_enqueue_script('ffb-admin', plugin_dir_url(__FILE__) . 'assets/js/admin.js', array('jquery', 'jquery-ui-tabs', 'select2'), '2.1.66', true);
+        wp_enqueue_script('ffb-admin', plugin_dir_url(__FILE__) . 'assets/js/admin.js', array('jquery', 'jquery-ui-tabs', 'select2'), '2.1.83', true);
         
         // Enqueue our admin styles
-        wp_enqueue_style('ffb-admin-styles', plugin_dir_url(__FILE__) . 'assets/css/admin.css', array(), '2.1.66');
+        wp_enqueue_style('ffb-admin-styles', plugin_dir_url(__FILE__) . 'assets/css/admin.css', array(), '2.1.83');
         
         // Pass data to the script
         wp_localize_script('ffb-admin', 'ffbAdminVars', array(
@@ -1216,7 +1482,7 @@ class FormidableFormsBlocker {
         
         // Log the allowed access
         $country_name = isset($geo_data['country_name']) ? $geo_data['country_name'] : 'Unknown';
-        $region_name = isset($geo_data['region_name']) ? $geo_data['region_name'] : 'Unknown';
+        $region_name = isset($geo_data['region']) ? $geo_data['region'] : 'Unknown';
         $this->log_access_attempt($ip, 'allowed', 'Location allowed', $this->get_form_id_from_content($content), 'form_load');
         
         // Allow the form to be displayed
@@ -1256,7 +1522,7 @@ class FormidableFormsBlocker {
         $debug .= "DECISION PROCESS:\n";
         
         // Country check
-        if (!empty($geo_data['country_code'])) {
+        if (!empty($geo_data)) {
             $country_code = strtoupper($geo_data['country_code']);
             $approved_countries = array_map('strtoupper', $this->approved_countries);
             
@@ -1269,14 +1535,13 @@ class FormidableFormsBlocker {
             }
             
             if (!in_array($country_code, $approved_countries)) {
-                error_log('FFB Debug: Country blocked: ' . $country_code);
+                error_log('FFB Debug: Country blocked: ' . $country_code . ' - Approved countries: ' . implode(',', $approved_countries));
                 return;
             }
         }
         
         // State check
-        if (isset($geo_data['country_code']) && strtoupper($geo_data['country_code']) == 'US' && 
-            !empty($geo_data['region_code'])) {
+        if (isset($geo_data['country_code']) && strtoupper($geo_data['country_code']) == 'US' && !empty($geo_data['region_code'])) {
             $region_code = strtoupper($geo_data['region_code']);
             $approved_states_upper = array_map('strtoupper', $this->get_approved_states());
             
@@ -1293,16 +1558,24 @@ class FormidableFormsBlocker {
                 return;
             } else {
                 error_log('FFB Debug: State allowed: ' . $region_code);
+                // State is approved, no need to check ZIP
+                return;
             }
         }
         
         // ZIP check
         if (!empty($geo_data['zip']) && !empty($this->approved_zip_codes)) {
-            $zip = substr($geo_data['zip'], 0, 5);
-            $approved_zip_codes = $this->get_approved_zip_codes();
-            if (!in_array($zip, $approved_zip_codes)) {
-                error_log('FFB Debug: ZIP code blocked: ' . $zip);
-                return;
+            $zip = substr($geo_data['zip'], 0, 5); // Get first 5 digits for US zip codes
+            
+            // If we have a non-empty approved ZIP list, check against it
+            if (!empty($this->approved_zip_codes)) {
+                if (!in_array($zip, $this->approved_zip_codes)) {
+                    error_log('FFB Debug: ZIP code blocked: ' . $zip);
+                    return;
+                } else {
+                    error_log('FFB Debug: ZIP code allowed: ' . $zip);
+                    return;
+                }
             }
         }
         
@@ -1413,7 +1686,6 @@ class FormidableFormsBlocker {
         // Try to decode the JSON response
         $data = json_decode($body, true);
         
-        // Check if JSON parsing failed
         if (json_last_error() !== JSON_ERROR_NONE) {
             $json_error = json_last_error_msg();
             error_log('FFB Debug: JSON parsing error: ' . $json_error);
@@ -1482,13 +1754,18 @@ class FormidableFormsBlocker {
         }
         
         // Try to get real usage data from the API
-        $api_url = 'https://api.ipapi.com/api?access_key=' . $api_key;
+        // Use the usage endpoint specifically to get accurate cross-site data
+        $api_url = 'https://api.ipapi.com/api/check?access_key=' . $api_key;
+        
+        error_log('FFB Debug: Refreshing API usage from ' . $api_url);
+        
         $response = wp_remote_get($api_url, array(
             'timeout' => 15,
             'user-agent' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url')
         ));
         
         if (is_wp_error($response)) {
+            error_log('FFB Debug: API usage refresh error: ' . $response->get_error_message());
             wp_send_json_error($response->get_error_message());
             return;
         }
@@ -1497,18 +1774,22 @@ class FormidableFormsBlocker {
         $data = json_decode($body, true);
         
         if (json_last_error() !== JSON_ERROR_NONE) {
+            error_log('FFB Debug: API usage refresh error: Invalid API response (JSON error)');
             wp_send_json_error('Invalid API response');
             return;
         }
 
         // If we have valid data, format and return it
-        if (isset($data['requests']) && isset($data['limit'])) {
+        if (isset($data['usage']) && isset($data['usage']['limit']) && isset($data['usage']['current'])) {
+            // This endpoint gives us aggregate usage across all sites using the same API key
             $usage = array(
                 'month' => date('Y-m'),
-                'requests' => $data['requests'],
-                'limit' => $data['limit'],
+                'requests' => $data['usage']['current'],
+                'limit' => $data['usage']['limit'],
                 'last_check' => $current_time
             );
+            
+            error_log('FFB Debug: API usage updated. ' . $usage['requests'] . ' / ' . $usage['limit']);
             
             // Update the option with the new data
             update_option('ffb_api_usage', $usage);
@@ -1516,6 +1797,39 @@ class FormidableFormsBlocker {
             // Send response
             wp_send_json_success($usage);
             return;
+        }
+        
+        // If the endpoint didn't return usage data but the response is valid
+        if (isset($data)) {
+            // Check if there's an error message in the API response
+            if (isset($data['error']) && isset($data['error']['info'])) {
+                error_log('FFB Debug: API usage refresh error: ' . $data['error']['info']);
+                wp_send_json_error('API Error: ' . $data['error']['info']);
+                return;
+            }
+            
+            // Check if we can extract usage data from API response headers
+            $headers = wp_remote_retrieve_headers($response);
+            if ($headers && isset($headers['X-Rate-Limit-Limit']) && isset($headers['X-Rate-Limit-Remaining'])) {
+                $limit = intval($headers['X-Rate-Limit-Limit']);
+                $used = $limit - intval($headers['X-Rate-Limit-Remaining']);
+                
+                $usage = array(
+                    'month' => date('Y-m'),
+                    'requests' => $used,
+                    'limit' => $limit,
+                    'last_check' => $current_time
+                );
+                
+                error_log('FFB Debug: API usage extracted from headers. ' . $usage['requests'] . ' / ' . $usage['limit']);
+                
+                // Update the option with the header data
+                update_option('ffb_api_usage', $usage);
+                
+                // Send response
+                wp_send_json_success($usage);
+                return;
+            }
         }
         
         // If we couldn't get real data, generate demo data
@@ -1526,6 +1840,8 @@ class FormidableFormsBlocker {
             'last_check' => $current_time,
             'is_demo' => true // Flag to indicate this is demo data
         );
+        
+        error_log('FFB Debug: Using demo API usage data');
         
         // Update the option with the demo data
         update_option('ffb_api_usage', $usage);
@@ -1584,8 +1900,9 @@ class FormidableFormsBlocker {
                 
                 // Blocked message
                 if (isset($_POST['ffb_blocked_message'])) {
-                    update_option('ffb_blocked_message', wp_kses_post($_POST['ffb_blocked_message']));
-                    $this->blocked_message = wp_kses_post($_POST['ffb_blocked_message']);
+                    $blocked_message = wp_kses_post(stripslashes($_POST['ffb_blocked_message']));
+                    update_option('ffb_blocked_message', $blocked_message);
+                    $this->blocked_message = $blocked_message;
                 }
                 
                 // Logging enabled
@@ -1630,9 +1947,6 @@ class FormidableFormsBlocker {
                     $whitelist = array_filter($whitelist);
                     update_option('ffb_ip_whitelist', $whitelist);
                     $this->ip_whitelist = $whitelist;
-                } else {
-                    update_option('ffb_ip_whitelist', array());
-                    $this->ip_whitelist = array();
                 }
                 
                 // IP blacklist
@@ -1649,7 +1963,7 @@ class FormidableFormsBlocker {
                 
                 // Clear geolocation cache
                 error_log('FFB Debug: Clearing geolocation cache');
-                clear_geo_cache();
+                $this->clear_all_geo_cache();
                 
                 // Set transient to show success message
                 error_log('FFB Debug: Setting success transient');
@@ -1751,6 +2065,11 @@ class FormidableFormsBlocker {
             return false;
         }
         
+        // Add detailed debugging
+        if (is_array($geo_data)) {
+            error_log('FFB Debug: Geo data for location check: ' . json_encode($geo_data));
+        }
+        
         // Check country first
         if (!empty($geo_data['country_code'])) {
             $country_code = strtoupper($geo_data['country_code']);
@@ -1768,10 +2087,27 @@ class FormidableFormsBlocker {
                 error_log('FFB Debug: Country blocked: ' . $country_code);
                 return false;
             }
+        } elseif (!empty($geo_data['countryCode'])) {
+            // Try alternate field name (some APIs use different formats)
+            $country_code = strtoupper($geo_data['countryCode']);
+            $approved_countries = array_map('strtoupper', $this->approved_countries);
+            
+            error_log('FFB Debug: Checking country (alt format): ' . $country_code . ' against approved countries: ' . implode(',', $approved_countries));
+            
+            if (empty($approved_countries)) {
+                error_log('FFB Debug: No approved countries configured, allowing all countries');
+                return true;
+            }
+            
+            if (!in_array($country_code, $approved_countries)) {
+                error_log('FFB Debug: Country blocked: ' . $country_code);
+                return false;
+            }
         }
         
         // If country is allowed, check state/region if it's US
-        if (!empty($geo_data['country_code']) && strtoupper($geo_data['country_code']) == 'US') {
+        if (isset($geo_data['country_code']) && strtoupper($geo_data['country_code']) == 'US' || 
+            isset($geo_data['countryCode']) && strtoupper($geo_data['countryCode']) == 'US') {
             // Get region code from API response
             $region_code = '';
             
@@ -1797,12 +2133,8 @@ class FormidableFormsBlocker {
             if ($region_code === 'Unknown' || $region_code === '') {
                 if (isset($geo_data['region_code'])) {
                     $region_code = $geo_data['region_code'];
-                    $region_name = $region_code;
-                    $region = $region_code;
                 } elseif (isset($geo_data['regionCode'])) {
                     $region_code = $geo_data['regionCode'];
-                    $region_name = $region_code;
-                    $region = $region_code;
                 }
             }
             
@@ -1825,8 +2157,24 @@ class FormidableFormsBlocker {
                     return false;
                 }
             } else {
-                error_log('FFB Debug: No region code available for checking, defaulting to block for security');
-                return false; // If we can't determine the region, block access for security
+                // Special handling for mobile cases where region code might be missing
+                error_log('FFB Debug: No region code available for checking');
+                
+                // If we're in diagnostic mode, allow access
+                if ($this->diagnostic_mode) {
+                    error_log('FFB Debug: Diagnostic mode enabled, allowing access despite missing region code');
+                    return true;
+                }
+                
+                // If the IP is in an approved location AND we can't determine region, 
+                // let's give benefit of the doubt rather than incorrectly blocking
+                if (!empty($this->approved_states)) {
+                    error_log('FFB Debug: Cannot determine region but IP is from approved country - allowing access');
+                    return true;
+                }
+                
+                error_log('FFB Debug: No region code available for checking, but no approved states configured - defaulting to allowing access');
+                return true;
             }
             
             // If state is allowed, check ZIP code if we have it and ZIP restrictions are in place
@@ -1835,6 +2183,14 @@ class FormidableFormsBlocker {
                 $approved_zip_codes = $this->get_approved_zip_codes();
                 if (!in_array($zip, $approved_zip_codes)) {
                     error_log('FFB Debug: ZIP code ' . $zip . ' not in approved list');
+                    return false;
+                }
+            } elseif (isset($geo_data['postal']) && !empty($geo_data['postal']) && !empty($this->approved_zip_codes)) {
+                // Try alternate field name
+                $zip = substr($geo_data['postal'], 0, 5);
+                $approved_zip_codes = $this->get_approved_zip_codes();
+                if (!in_array($zip, $approved_zip_codes)) {
+                    error_log('FFB Debug: ZIP code (from postal) ' . $zip . ' not in approved list');
                     return false;
                 }
             }
@@ -1953,25 +2309,345 @@ class FormidableFormsBlocker {
         return strtoupper($region_name);
     }
 
+    public function log_access_attempt($ip, $status, $reason, $form_id = 0, $log_type = 'form_load') {
+        // Check if logging is enabled
+        if (!$this->log_enabled) {
+            return false;
+        }
+        
+        // Get geo data
+        $geo_data = $this->get_geo_data($ip);
+        
+        // Debug the received geo data
+        error_log('FFB Debug: Received geo data for logging: ' . print_r($geo_data, true));
+        
+        // Prepare data for logging
+        // Different APIs use different keys, so check all possible variations
+        $country = '';
+        if (isset($geo_data['country_name']) && !empty($geo_data['country_name']) && $geo_data['country_name'] !== 'Unknown') {
+            $country = $geo_data['country_name'];
+        } elseif (isset($geo_data['country']) && !empty($geo_data['country'])) {
+            $country = $geo_data['country'];
+        } elseif (isset($geo_data['countryName']) && !empty($geo_data['countryName'])) {
+            $country = $geo_data['countryName'];
+        }
+        
+        $country_code = '';
+        if (isset($geo_data['country_code']) && !empty($geo_data['country_code']) && $geo_data['country_code'] !== 'Unknown') {
+            $country_code = $geo_data['country_code'];
+        } elseif (isset($geo_data['countryCode']) && !empty($geo_data['countryCode'])) {
+            $country_code = $geo_data['countryCode'];
+        }
+        
+        $region_name = '';
+        if (isset($geo_data['region_name']) && !empty($geo_data['region_name']) && $geo_data['region_name'] !== 'Unknown') {
+            $region_name = $geo_data['region_name'];
+        } elseif (isset($geo_data['regionName']) && !empty($geo_data['regionName'])) {
+            $region_name = $geo_data['regionName'];
+        } elseif (isset($geo_data['state']) && !empty($geo_data['state'])) {
+            $region_name = $geo_data['state'];
+        } elseif (isset($geo_data['subdivision_1_name']) && !empty($geo_data['subdivision_1_name'])) {
+            $region_name = $geo_data['subdivision_1_name'];
+        }
+        
+        $region_code = '';
+        if (isset($geo_data['region_code']) && !empty($geo_data['region_code']) && $geo_data['region_code'] !== 'Unknown') {
+            $region_code = $geo_data['region_code'];
+        } elseif (isset($geo_data['region']) && !empty($geo_data['region'])) {
+            $region_code = $geo_data['region'];
+        } elseif (isset($geo_data['regionCode']) && !empty($geo_data['regionCode'])) {
+            $region_code = $geo_data['regionCode'];
+        } elseif (isset($geo_data['subdivision_1_code']) && !empty($geo_data['subdivision_1_code'])) {
+            $region_code = $geo_data['subdivision_1_code'];
+        }
+        
+        // If we have a region code but no region name, use the code as the name
+        if (empty($region_name) && !empty($region_code)) {
+            $region_name = $region_code;
+        }
+        
+        // If we have a country code but no country name, use the code as the name
+        if (empty($country) && !empty($country_code)) {
+            $country = $country_code;
+        }
+        
+        // Log geo data for debugging
+        error_log('FFB Debug: Logging access attempt with country: ' . $country . ', country_code: ' . $country_code . ', region_name: ' . $region_name . ', region_code: ' . $region_code);
+        
+        // Get the WordPress database object
+        global $wpdb;
+        
+        // Define the table name
+        $table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
+        
+        // Insert the log entry
+        $result = $wpdb->insert(
+            $table_name,
+            array(
+                'timestamp' => current_time('mysql'),
+                'ip_address' => $ip,
+                'status' => $status,
+                'reason' => $reason,
+                'country_code' => $country_code,
+                'country_name' => $country,
+                'region_code' => $region_code,
+                'region_name' => $region_name,
+                'city' => isset($geo_data['city']) && !empty($geo_data['city']) ? $geo_data['city'] : '',
+                'zip' => isset($geo_data['zip']) && !empty($geo_data['zip']) ? $geo_data['zip'] : 
+                      (isset($geo_data['postal']) && !empty($geo_data['postal']) ? $geo_data['postal'] : ''),
+                'form_id' => $form_id,
+                'log_type' => $log_type,
+                'geo_data' => json_encode($geo_data)
+            ),
+            array(
+                '%s', // timestamp
+                '%s', // ip_address
+                '%s', // status
+                '%s', // reason
+                '%s', // country_code
+                '%s', // country_name
+                '%s', // region_code
+                '%s', // region_name
+                '%s', // city
+                '%s', // zip
+                '%d', // form_id
+                '%s', // log_type
+                '%s'  // geo_data
+            )
+        );
+        
+        if ($result === false) {
+            error_log('FFB Error: Failed to insert log entry: ' . $wpdb->last_error);
+            return false;
+        }
+        
+        return true;
+    }
+    
+    /**
+     * AJAX endpoint to get the current approved states list
+     */
+    public function ajax_get_approved_states() {
+        // Verify nonce for security
+        if (!isset($_REQUEST['nonce']) || !wp_verify_nonce($_REQUEST['nonce'], 'ffb_admin_nonce')) {
+            wp_send_json_error('Invalid security token');
+            return;
+        }
+
+        // Get the current approved states
+        $approved_states = $this->get_approved_states();
+        
+        // Log for debugging
+        error_log('FFB Debug: AJAX request for approved states, returning: ' . implode(',', $approved_states));
+        
+        // Return the approved states
+        wp_send_json_success(array(
+            'approved_states' => $approved_states,
+            'timestamp' => current_time('timestamp')
+        ));
+    }
+    
+    /**
+     * Add all hooks and filters
+     */
+    private function add_hooks() {
+        add_action('init', array($this, 'init'));
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
+        add_action('admin_enqueue_scripts', array($this, 'admin_scripts'));
+        add_action('admin_menu', array($this, 'add_admin_menu'));
+        add_filter('the_content', array($this, 'block_form'), 99);
+        
+        // AJAX handlers
+        add_action('wp_ajax_ffb_test_api_key', array($this, 'ajax_test_api_key'));
+        add_action('wp_ajax_nopriv_ffb_test_api_key', array($this, 'ajax_test_api_key'));
+        add_action('wp_ajax_ffb_refresh_api_usage', array($this, 'ajax_refresh_api_usage'));
+        add_action('wp_ajax_ffb_get_approved_states', array($this, 'ajax_get_approved_states'));
+        add_action('wp_ajax_nopriv_ffb_get_approved_states', array($this, 'ajax_get_approved_states'));
+        add_action('wp_ajax_ffb_check_location', array($this, 'ajax_check_location'));
+        add_action('wp_ajax_nopriv_ffb_check_location', array($this, 'ajax_check_location'));
+        
+        // Admin post actions
+        add_action('admin_post_ffb_save_settings', array($this, 'handle_save_settings'));
+        add_action('admin_post_ffb_clear_access_log', array($this, 'handle_clear_logs'));
+        add_action('admin_post_ffb_update_api_key', array($this, 'update_api_key'));
+        add_action('admin_post_ffb_create_table', array($this, 'manual_create_table'));
+        add_action('admin_post_ffb_export_logs_csv', array($this, 'handle_export_logs_csv'));
+    }
+    
+    /**
+     * AJAX handler for location checking
+     * This function helps overcome caching issues by providing a dynamic check
+     */
+    public function ajax_check_location() {
+        // Check for nonce for security
+        check_ajax_referer('ffb_check_location', 'nonce');
+        
+        // Get client IP
+        $ip = $this->get_client_ip();
+        
+        // Log the check
+        error_log('FFB Debug: AJAX location check for IP ' . $ip);
+        
+        // Check if IP is in the whitelist
+        if ($this->is_ip_whitelisted($ip)) {
+            error_log('FFB Debug: IP ' . $ip . ' is whitelisted, allowing form display via AJAX');
+            wp_send_json_success(array(
+                'allowed' => true,
+                'message' => 'IP is whitelisted'
+            ));
+            return;
+        }
+        
+        // Get geo data
+        $geo_data = $this->get_geo_data($ip);
+        
+        // If geo data is null or empty and diagnostic mode is enabled, allow the form
+        if (empty($geo_data) && $this->diagnostic_mode) {
+            error_log('FFB Diagnostic: Allowing form despite missing geo data via AJAX');
+            wp_send_json_success(array(
+                'allowed' => true,
+                'message' => 'Diagnostic mode enabled'
+            ));
+            return;
+        }
+        
+        // If geo data is null or empty, block the form
+        if (empty($geo_data)) {
+            error_log('FFB Debug: No geo data available for IP ' . $ip . ', blocking form via AJAX');
+            wp_send_json_success(array(
+                'allowed' => false,
+                'message' => $this->get_blocked_message()
+            ));
+            return;
+        }
+        
+        // Check if location is blocked
+        if ($this->is_location_blocked($geo_data)) {
+            error_log('FFB Debug: Location is blocked for IP ' . $ip . ', blocking form via AJAX');
+            $this->log_access_attempt($ip, 'blocked', 'Location blocked', 'ajax', 'form_load');
+            wp_send_json_success(array(
+                'allowed' => false,
+                'message' => $this->get_blocked_message()
+            ));
+            return;
+        }
+        
+        // Check if IP is in the blacklist
+        if ($this->is_ip_blacklisted($ip)) {
+            error_log('FFB Debug: IP ' . $ip . ' is blacklisted, blocking form via AJAX');
+            $this->log_access_attempt($ip, 'blocked', 'IP blacklisted', 'ajax', 'form_load');
+            wp_send_json_success(array(
+                'allowed' => false,
+                'message' => $this->get_blocked_message()
+            ));
+            return;
+        }
+        
+        // Log the allowed access
+        $this->log_access_attempt($ip, 'allowed', 'Location allowed', 'ajax', 'form_load');
+        
+        // Allow the form to be displayed
+        wp_send_json_success(array(
+            'allowed' => true,
+            'message' => 'Location allowed'
+        ));
+    }
+    
+    /**
+     * Clear all geolocation cache entries
+     * This is needed when states or countries are updated
+     */
+    public function clear_all_geo_cache() {
+        global $wpdb;
+        
+        error_log('FFB Debug: Clearing all geolocation cache entries');
+        
+        // Find all transients that start with ffb_geo_
+        $transients = $wpdb->get_col("
+            SELECT option_name 
+            FROM $wpdb->options 
+            WHERE option_name LIKE '%_transient_ffb_geo_%' 
+            OR option_name LIKE '%_transient_timeout_ffb_geo_%'
+        ");
+        
+        if (empty($transients)) {
+            error_log('FFB Debug: No geolocation cache entries found');
+            return 0;
+        }
+        
+        $count = 0;
+        foreach ($transients as $transient) {
+            // Extract the actual transient name without the _transient_ prefix
+            $name = str_replace(array('_transient_', '_transient_timeout_'), '', $transient);
+            delete_transient($name);
+            $count++;
+        }
+        
+        error_log('FFB Debug: Cleared ' . $count . ' geolocation cache entries');
+        return $count;
+    }
+    
+    /**
+     * Get the blocked message to display when forms are blocked
+     * 
+     * @return string The message to display to blocked users
+     */
+    public function get_blocked_message() {
+        $message = get_option('ffb_blocked_message', '');
+        
+        // If no message is set, use a default
+        if (empty($message)) {
+            $message = '<div class="frm_error_style" style="text-align:center;"><p>We apologize, but we are currently not accepting submissions from your location.</p></div>';
+        }
+        
+        return $message;
+    }
+
     /**
      * Check if the current content contains a Formidable Form
      */
-    private function is_form_page($content) {
+    public function is_form_page($content = null) {
+        // If content is null, get it from global post
+        if ($content === null) {
+            global $post;
+            
+            if (!is_object($post)) {
+                error_log('FFB Debug: No post object available for form detection');
+                return false;
+            }
+            
+            $content = $post->post_content;
+            error_log('FFB Debug: Using post content for form detection. ID: ' . $post->ID);
+        }
+        
+        // Add debug logging
+        error_log('FFB Debug: Checking if content contains a form. Content length: ' . strlen($content));
+        
         // Check for Formidable Forms shortcode
         if (strpos($content, '[formidable') !== false) {
+            error_log('FFB Debug: Found formidable shortcode in content');
             return true;
         }
         
         // Check for Formidable Forms div
-        if (strpos($content, 'class="frm_forms') !== false) {
+        if (strpos($content, 'class="frm_forms') !== false || strpos($content, 'class="frm-show-form') !== false) {
+            error_log('FFB Debug: Found frm_forms class in content');
+            return true;
+        }
+        
+        // Check for Formidable Forms form element
+        if (strpos($content, '<form') !== false && (strpos($content, 'formidable') !== false || strpos($content, 'frm_pro_form') !== false)) {
+            error_log('FFB Debug: Found formidable form element in content');
             return true;
         }
         
         // Check for Formidable Forms block
         if (strpos($content, '<!-- wp:formidable/simple-form') !== false) {
+            error_log('FFB Debug: Found formidable block in content');
             return true;
         }
         
+        error_log('FFB Debug: No form found in content');
         return false;
     }
     
@@ -1996,284 +2672,6 @@ class FormidableFormsBlocker {
         
         return '';
     }
-
-    /**
-     * Shortcode to check location and display status
-     */
-    public function shortcode_check_location($atts) {
-        $atts = shortcode_atts(array(
-            'ip' => '',
-        ), $atts);
-        
-        // Get the IP to check
-        $ip = !empty($atts['ip']) ? $atts['ip'] : $this->get_client_ip();
-        
-        // Get geolocation data
-        $geo_data = $this->get_geo_data($ip);
-        
-        // Check if location is blocked
-        $is_blocked = $this->is_location_blocked($geo_data);
-        
-        // Format the output
-        $output = '<div class="ffb-location-check">';
-        $output .= '<p><strong>IP:</strong> ' . esc_html($ip) . '</p>';
-        
-        if (!empty($geo_data)) {
-            $output .= '<p><strong>Country:</strong> ' . esc_html($geo_data['country_name'] ?? 'Unknown') . ' (' . esc_html($geo_data['country_code'] ?? '') . ')</p>';
-            $output .= '<p><strong>State:</strong> ' . esc_html($geo_data['region_name'] ?? 'Unknown') . ' (' . esc_html($geo_data['region_code'] ?? '') . ')</p>';
-            $output .= '<p><strong>City:</strong> ' . esc_html($geo_data['city'] ?? 'Unknown') . '</p>';
-            $output .= '<p><strong>ZIP:</strong> ' . esc_html($geo_data['zip'] ?? 'Unknown') . '</p>';
-        } else {
-            $output .= '<p>Could not retrieve geolocation data for this IP.</p>';
-        }
-        
-        $status_class = $is_blocked ? 'blocked' : 'allowed';
-        $status_text = $is_blocked ? 'Blocked' : 'Allowed';
-        
-        $output .= '<p class="ffb-status ffb-status-' . $status_class . '"><strong>Status:</strong> ' . $status_text . '</p>';
-        $output .= '</div>';
-        
-        return $output;
-    }
-
-    /**
-     * Get the blocked message to display when forms are blocked
-     * 
-     * @return string The message to display
-     */
-    public function get_blocked_message() {
-        return get_option('ffb_blocked_message', '<div class="frm_error_style" style="text-align:center;"><p>We apologize, but we are currently not accepting submissions from your location.</p></div>');
-    }
-
-    /**
-     * Filter the content to check for forms and block them if necessary
-     * 
-     * @param string $content The content to filter
-     * @return string The filtered content
-     */
-    public function filter_content($content) {
-        // Check if we're on a form page
-        if (!$this->is_form_page($content)) {
-            return $content;
-        }
-        
-        // Get client IP
-        $ip = $this->get_client_ip();
-        
-        // Check if IP is in the whitelist
-        if ($this->is_ip_whitelisted($ip)) {
-            error_log('FFB Debug: IP ' . $ip . ' is whitelisted, allowing form display');
-            $this->log_access_attempt($ip, 'allowed', 'IP whitelisted', $this->get_form_id_from_content($content), 'form_load');
-            return $content;
-        }
-        
-        // Get geo data
-        $geo_data = $this->get_geo_data($ip);
-        
-        // If geo data is null and diagnostic mode is enabled, allow the form
-        if (empty($geo_data) && $this->diagnostic_mode) {
-            error_log('FFB Diagnostic: Allowing form despite missing geo data');
-            $this->log_access_attempt($ip, 'allowed', 'Diagnostic mode enabled', $this->get_form_id_from_content($content), 'form_load');
-            return $content;
-        }
-        
-        // If geo data is null, block the form
-        if (empty($geo_data)) {
-            error_log('FFB Debug: No geo data available for IP ' . $ip . ', blocking form');
-            $this->log_access_attempt($ip, 'blocked', 'No geo data available', $this->get_form_id_from_content($content), 'form_load');
-            return $this->replace_forms_with_message($content, $this->get_blocked_message());
-        }
-        
-        // Check if location is blocked
-        if ($this->is_location_blocked($geo_data)) {
-            error_log('FFB Debug: Location is blocked for IP ' . $ip . ', blocking form');
-            $this->log_access_attempt($ip, 'blocked', 'Location blocked', $this->get_form_id_from_content($content), 'form_load');
-            return $this->replace_forms_with_message($content, $this->get_blocked_message());
-        }
-        
-        // Check if IP is in the blacklist
-        if ($this->is_ip_blacklisted($ip)) {
-            error_log('FFB Debug: IP ' . $ip . ' is blacklisted, blocking form');
-            $this->log_access_attempt($ip, 'blocked', 'IP blacklisted', $this->get_form_id_from_content($content), 'form_load');
-            return $this->replace_forms_with_message($content, $this->get_blocked_message());
-        }
-        
-        // Log the allowed access
-        $country_name = isset($geo_data['country_name']) ? $geo_data['country_name'] : 'Unknown';
-        $region_name = isset($geo_data['region']) ? $geo_data['region'] : 'Unknown';
-        $this->log_access_attempt($ip, 'allowed', 'Location allowed', $this->get_form_id_from_content($content), 'form_load');
-        
-        // Allow the form to be displayed
-        return $content;
-    }
-    
-    /**
-     * Log an access attempt to the database
-     * 
-     * @param string $ip The IP address
-     * @param string $status The status of the attempt (allowed/blocked)
-     * @param string $reason The reason for the status
-     * @param int $form_id The ID of the form
-     * @param string $log_type The type of log (form_load/form_submit)
-     * @return bool True if logged successfully, false otherwise
-     */
-    private function log_access_attempt($ip, $status, $reason, $form_id = 0, $log_type = 'form_load') {
-        // Check if logging is enabled
-        if (!$this->log_enabled) {
-            return false;
-        }
-        
-        // Get geo data
-        $geo_data = $this->get_geo_data($ip);
-        
-        // Debug the received geo data
-        error_log('FFB Debug: Received geo data for logging: ' . print_r($geo_data, true));
-        
-        // Prepare data for logging
-        // Different APIs use different keys, so check all possible variations
-        $country = isset($geo_data['country_name']) ? $geo_data['country_name'] : 
-                  (isset($geo_data['country']) ? $geo_data['country'] : 'Unknown');
-                  
-        $country_code = isset($geo_data['country_code']) ? $geo_data['country_code'] : 
-                       (isset($geo_data['countryCode']) ? $geo_data['countryCode'] : 'Unknown');
-                       
-        // Region handling - check all possible variations of region keys
-        $region = 'Unknown';
-        $region_name = 'Unknown';
-        
-        // Check for various ways region might be stored
-        if (isset($geo_data['region_name'])) {
-            $region = $geo_data['region_name'];
-            $region_name = $geo_data['region_name'];
-        } elseif (isset($geo_data['regionName'])) {
-            $region = $geo_data['regionName'];
-            $region_name = $geo_data['regionName'];
-        } elseif (isset($geo_data['region'])) {
-            $region = $geo_data['region'];
-            $region_name = $geo_data['region'];
-        } elseif (isset($geo_data['state'])) {
-            $region = $geo_data['state'];
-            $region_name = $geo_data['state'];
-        } elseif (isset($geo_data['subdivision_1_name'])) {
-            $region = $geo_data['subdivision_1_name'];
-            $region_name = $geo_data['subdivision_1_name'];
-        } elseif (isset($geo_data['subdivision_1_code'])) {
-            $region = $geo_data['subdivision_1_code'];
-            $region_name = $geo_data['subdivision_1_code'];
-        }
-        
-        // Also check if we have a region code
-        if ($region === 'Unknown' || $region_name === 'Unknown') {
-            if (isset($geo_data['region_code'])) {
-                $region_code = $geo_data['region_code'];
-                $region_name = $region_code;
-                $region = $region_code;
-            } elseif (isset($geo_data['regionCode'])) {
-                $region_code = $geo_data['regionCode'];
-                $region_name = $region_code;
-                $region = $region_code;
-            }
-        }
-        
-        $city = isset($geo_data['city']) ? $geo_data['city'] : 'Unknown';
-        $zip = isset($geo_data['postal']) ? $geo_data['postal'] : 
-              (isset($geo_data['zip']) ? $geo_data['zip'] : 'Unknown');
-        
-        // Log geo data for debugging
-        error_log('FFB Debug: Logging access attempt with country_code: ' . $country_code . ', region_name: ' . $region_name);
-        
-        // Get the WordPress database object
-        global $wpdb;
-        
-        // Define the table name
-        $table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
-        
-        // Insert the log entry
-        $result = $wpdb->insert(
-            $table_name,
-            array(
-                'ip_address' => $ip,
-                'status' => $status,
-                'reason' => $reason,
-                'country' => $country,
-                'country_code' => $country_code,
-                'region' => $region,
-                'region_name' => $region_name,
-                'city' => $city,
-                'zip' => $zip,
-                'form_id' => $form_id,
-                'log_type' => $log_type,
-                'timestamp' => current_time('mysql')
-            ),
-            array(
-                '%s', // ip_address
-                '%s', // status
-                '%s', // reason
-                '%s', // country
-                '%s', // country_code
-                '%s', // region
-                '%s', // region_name
-                '%s', // city
-                '%s', // zip
-                '%d', // form_id
-                '%s', // log_type
-                '%s'  // timestamp
-            )
-        );
-        
-        // Check if the insert was successful
-        if ($result === false) {
-            error_log('FFB Error: Failed to log access attempt. DB Error: ' . $wpdb->last_error);
-            return false;
-        }
-        
-        return true;
-    }
-
-    /**
-     * AJAX endpoint to get the current approved states list
-     */
-    public function ajax_get_approved_states() {
-        // Verify nonce for security
-        if (!isset($_REQUEST['nonce']) || !wp_verify_nonce($_REQUEST['nonce'], 'ffb_admin_nonce')) {
-            wp_send_json_error('Invalid security token');
-            return;
-        }
-        
-        // Get the current approved states
-        $approved_states = $this->get_approved_states();
-        
-        // Log for debugging
-        error_log('FFB Debug: AJAX request for approved states, returning: ' . implode(',', $approved_states));
-        
-        // Return the approved states
-        wp_send_json_success(array(
-            'approved_states' => $approved_states,
-            'timestamp' => current_time('timestamp')
-        ));
-    }
-    
-    /**
-     * Add all hooks and filters
-     */
-    private function add_hooks() {
-        add_action('init', array($this, 'init'));
-        add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
-        add_action('admin_enqueue_scripts', array($this, 'admin_scripts'));
-        add_action('admin_menu', array($this, 'add_admin_menu'));
-        add_filter('the_content', array($this, 'filter_content'), 99);
-        
-        // AJAX handlers
-        add_action('wp_ajax_ffb_test_api_key', array($this, 'ajax_test_api_key'));
-        add_action('wp_ajax_ffb_check_location', array($this, 'ajax_check_location'));
-        add_action('wp_ajax_ffb_refresh_api_usage', array($this, 'ajax_refresh_api_usage'));
-        add_action('wp_ajax_ffb_clear_cache', array($this, 'ajax_clear_cache'));
-        add_action('wp_ajax_ffb_search_ip', array($this, 'ajax_search_ip'));
-        add_action('wp_ajax_ffb_delete_ip', array($this, 'ajax_delete_ip'));
-        
-        // Add action for manual table creation
-        add_action('admin_post_ffb_create_table', array($this, 'manual_create_table'));
-    }
 }
 
 // Initialize the plugin
@@ -2282,195 +2680,5 @@ $formidable_forms_blocker = new FormidableFormsBlocker();
 // Create the access log table when the plugin is activated
 register_activation_hook(__FILE__, 'ffb_create_log_table');
 
-function ffb_create_log_table() {
-    global $wpdb;
-    $table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
-    
-    // Check if table exists
-    if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") === $table_name) {
-        // Table already exists
-        return;
-    }
-    
-    // Create the table
-    $charset_collate = $wpdb->get_charset_collate();
-        
-    $sql = "CREATE TABLE $table_name (
-        id mediumint(9) NOT NULL AUTO_INCREMENT,
-        timestamp datetime DEFAULT '0000-00-00 00:00:00' NOT NULL,
-        ip_address varchar(45) NOT NULL,
-        country_code varchar(10),
-        country varchar(100),
-        region_name varchar(100),
-        region varchar(100),
-        city varchar(100),
-        zip varchar(20),
-        status varchar(20),
-        reason text,
-        form_id varchar(20),
-        log_type varchar(20) DEFAULT 'form_load',
-        geo_data text,
-        PRIMARY KEY  (id),
-        KEY ip_address (ip_address),
-        KEY status (status),
-        KEY log_type (log_type)
-    ) $charset_collate;";
-        
-    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
-    dbDelta($sql);
-        
-    // Update the DB version option to track that we've created the table
-    update_option('ffb_db_version', '2.1.66');
-    error_log('FFB Debug: Created access log table');
-}
-
-/**
- * Handle database migration for table name change
- */
-function ffb_handle_db_migration() {
-    global $wpdb;
-    $old_table_name = $wpdb->prefix . 'aqm_ffb_access_log';
-    $new_table_name = $wpdb->prefix . 'aqm_formidable_spam_blocker_log';
-    
-    // Check if old table exists
-    $old_table_exists = $wpdb->get_var("SHOW TABLES LIKE '$old_table_name'") === $old_table_name;
-    
-    // Check if new table exists
-    $new_table_exists = $wpdb->get_var("SHOW TABLES LIKE '$new_table_name'") === $new_table_name;
-    
-    // If old table exists but new one doesn't, rename it
-    if ($old_table_exists && !$new_table_exists) {
-        error_log('FFB Debug: Migrating database table from ' . $old_table_name . ' to ' . $new_table_name);
-        $wpdb->query("RENAME TABLE $old_table_name TO $new_table_name");
-        error_log('FFB Debug: Database table migration complete');
-    }
-    
-    // Update DB version
-    update_option('ffb_db_version', '2.1.66');
-}
-
-// Handle database migration on plugin load
-add_action('plugins_loaded', 'ffb_handle_db_migration');
-
-/**
- * Process settings form submission via admin-post.php
- */
-function handle_save_settings() {
-    // Debug log to track if this function is being called
-    error_log('FFB Debug: Standalone handle_save_settings function called');
-    error_log('FFB Debug: POST data: ' . print_r($_POST, true));
-    
-    // Verify capabilities
-    if (!current_user_can('manage_options')) {
-        wp_die('Unauthorized access');
-    }
-    
-    // Verify nonce
-    if (!isset($_POST['ffb_nonce']) || !wp_verify_nonce($_POST['ffb_nonce'], 'ffb_save_settings')) {
-        wp_die('Security check failed. Please refresh the page and try again.');
-    }
-    
-    // Get redirect URL
-    $redirect_url = isset($_POST['redirect_to']) ? esc_url_raw($_POST['redirect_to']) : admin_url('admin.php?page=ff-spam-blocker');
-    
-    // Save settings
-    // Save API key
-    if (isset($_POST['ffb_api_key'])) {
-        update_option('ffb_api_key', sanitize_text_field($_POST['ffb_api_key']));
-    }
-    
-    // Save approved countries
-    if (isset($_POST['ffb_approved_countries'])) {
-        $countries = array_map('sanitize_text_field', explode(',', $_POST['ffb_approved_countries']));
-        $countries = array_map('trim', $countries);
-        $countries = array_filter($countries);
-        update_option('ffb_approved_countries', $countries);
-    } else {
-        update_option('ffb_approved_countries', array());
-    }
-    
-    // Save approved states
-    if (isset($_POST['ffb_approved_states'])) {
-        $states = array_map('sanitize_text_field', explode(',', $_POST['ffb_approved_states']));
-        $states = array_map('trim', $states);
-        update_option('ffb_approved_states', $states);
-    } else {
-        update_option('ffb_approved_states', array());
-    }
-    
-    // Save approved ZIP codes
-    if (isset($_POST['ffb_approved_zip_codes'])) {
-        $zip_codes = array_map('sanitize_text_field', explode(',', $_POST['ffb_approved_zip_codes']));
-        $zip_codes = array_map('trim', $zip_codes);
-        update_option('ffb_approved_zip_codes', $zip_codes);
-    } else {
-        update_option('ffb_approved_zip_codes', array());
-    }
-    
-    // Save blocked message
-    if (isset($_POST['ffb_blocked_message'])) {
-        update_option('ffb_blocked_message', wp_kses_post($_POST['ffb_blocked_message']));
-    }
-    
-    // Save IP whitelist
-    if (isset($_POST['ffb_ip_whitelist'])) {
-        $whitelist = explode("\n", $_POST['ffb_ip_whitelist']);
-        $whitelist = array_map('trim', $whitelist);
-        $whitelist = array_filter($whitelist);
-        update_option('ffb_ip_whitelist', $whitelist);
-    }
-    
-    // Save all forms selection
-    update_option('ffb_block_all_forms', isset($_POST['ffb_block_all_forms']) ? '1' : '0');
-    
-    // Save specific forms
-    if (isset($_POST['ffb_specific_forms'])) {
-        update_option('ffb_specific_forms', $_POST['ffb_specific_forms']);
-    } else {
-        update_option('ffb_specific_forms', array());
-    }
-    
-    // Save debug mode
-    update_option('ffb_debug_mode', isset($_POST['ffb_debug_mode']) ? '1' : '0');
-    
-    // Save disable geolocation
-    update_option('ffb_disable_geolocation', isset($_POST['ffb_disable_geolocation']) ? '1' : '0');
-    
-    // Save log access attempts
-    update_option('ffb_log_access', isset($_POST['ffb_log_access']) ? '1' : '0');
-    
-    // Log settings update
-    error_log('FFB Debug: Settings updated via admin-post.php');
-    
-    // Set transient to show success message
-    set_transient('ffb_settings_saved', true, 30);
-    
-    // Define the redirect URL
-    $redirect_url = admin_url('admin.php') . '?page=ff-spam-blocker&settings-updated=true';
-    error_log('FFB Debug: About to redirect to: ' . $redirect_url);
-    
-    // Clean any output to prevent headers already sent issues
-    if (ob_get_length()) {
-        ob_end_clean();
-    }
-    
-    // Try different redirect approaches
-    if (!headers_sent()) {
-        error_log('FFB Debug: Performing standard redirect using wp_safe_redirect');
-        wp_safe_redirect($redirect_url);
-        exit;
-    } else {
-        error_log('FFB Debug: Headers already sent, using JavaScript redirect');
-        ?>
-        <script type="text/javascript">
-            window.location.href = "<?php echo $redirect_url; ?>";
-        </script>
-        <noscript><meta http-equiv="refresh" content="0;url=<?php echo $redirect_url; ?>"></noscript>
-        <p>If you are not redirected automatically, please <a href="<?php echo $redirect_url; ?>">click here</a>.</p>
-        <?php
-        exit;
-    }
-}
-
-// Register the standalone settings handler
-// add_action('admin_post_ffb_save_settings', 'handle_save_settings');
+// Include the direct-settings.php file which contains the ffb_create_log_table function
+require_once(plugin_dir_path(__FILE__) . 'direct-settings.php');
